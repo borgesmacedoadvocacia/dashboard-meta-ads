@@ -1364,7 +1364,21 @@ function analisar(base) {
   const serie = Object.values(porDia).sort((a, b) => a.dia - b.dia);
 
   const ultimaData = base.insights.reduce((m, r) => !m || r.data > m ? r.data : m, null);
-  return { per, linhas, tot, fechamentos, semCampanha, serie, ultimaData, diasDoMes };
+
+  /* Cobertura: o dia a dia cobre o período inteiro? Sem isto o painel soma o
+     que tem e apresenta como se fosse o total — foi assim que "mês atual"
+     mostrou R$ 3.524 quando o Gerenciador dizia R$ 5.612: a planilha só
+     tinha 7 dias. */
+  const diasComDados = new Set(base.insights.filter(r => daConta(r) && noPeriodo(r.data, per)).map(r => chaveDia(r.data)));
+  const faltando = [];
+  for (let d = new Date(per.ini); d <= per.fim; d.setDate(d.getDate() + 1))
+    if (!diasComDados.has(chaveDia(d))) faltando.push(new Date(d));
+  /* O gasto do mês que o PRÓPRIO Meta calcula (aba Janelas, janela "mes") é o
+     número do Gerenciador — serve de conferência quando o recorte é o mês. */
+  const gastoMetaMes = base.janelas.filter(j => j.janela === 'mes' && daConta(j)).reduce((t, j) => t + j.gasto, 0);
+  const cobertura = { faltando, gastoMetaMes, ehMesAtual: FILTRO.periodo === 'mes' };
+
+  return { per, linhas, tot, fechamentos, semCampanha, serie, ultimaData, diasDoMes, cobertura };
 }
 
 /* ================================================================ RENDER */
@@ -1486,9 +1500,15 @@ function renderResultados(base, a) {
     (FILTRO.conta !== 'todas' ? ' · conta <b>' + esc(FILTRO.conta) + '</b>' : '');
 
   const corRoi = tot.roi === null ? 'azul' : tot.roi >= 3 ? 'verde' : tot.roi >= 1 ? 'amarelo' : 'vermelho';
+  const cob = a.cobertura;
+  const faltaTxt = cob.faltando.length
+    ? '<b style="color:var(--amarelo)">faltam ' + cob.faltando.length + ' dia(s) na planilha</b>' +
+      (cob.ehMesAtual && cob.gastoMetaMes ? ' · o Meta informa <b>' + moeda(cob.gastoMetaMes) + '</b> no mês' : '')
+    : num(linhas.filter(l => l.gasto > 0).length) + ' campanha(s) com gasto no período' +
+      (cob.ehMesAtual && cob.gastoMetaMes && Math.abs(cob.gastoMetaMes - tot.gasto) > Math.max(5, tot.gasto * 0.02)
+        ? ' · Meta informa <b>' + moeda(cob.gastoMetaMes) + '</b>' : '');
   document.getElementById('kpis').innerHTML = [
-    cartaoKPI('Valor gasto', moeda(tot.gasto), 'azul',
-      '<span>' + num(linhas.filter(l => l.gasto > 0).length) + ' campanha(s) com gasto no período</span>'),
+    cartaoKPI('Valor gasto', moeda(tot.gasto), cob.faltando.length ? 'amarelo' : 'azul', '<span>' + faltaTxt + '</span>'),
     cartaoKPI('Orçamento diário', moeda(tot.orcDiario), 'azul',
       '<span>campanhas ativas · <b>' + moeda(tot.orcMensal) + '</b> no mês (× ' + a.diasDoMes + ' dias)</span>'),
     cartaoKPI('Leads', num(tot.leads), 'roxo',
@@ -1629,6 +1649,19 @@ function renderObsResultados(base, a) {
   if (!base.insights.length) {
     obs.push(obsCard('critico', '&#9888;', 'Ainda não há dados do Meta',
       'A planilha <i>Campanhas Meta Ads</i> não tem linhas em <b>Insights diários</b>. Rode <b>BM · Meta Ads → Sincronizar completa</b> no Apps Script.'));
+  }
+  if (a.cobertura.faltando.length && base.insights.length) {
+    const f = a.cobertura.faltando;
+    const lista = f.length <= 6 ? f.map(d => d.getDate() + '/' + (d.getMonth() + 1)).join(', ')
+      : fmtData(f[0]) + ' a ' + fmtData(f[f.length - 1]) + ' (' + f.length + ' dias)';
+    obs.unshift(obsCard('critico', '&#9888;', 'O dia a dia não cobre o período inteiro',
+      'A planilha não tem linhas para <b>' + lista + '</b>. O gasto e os leads acima somam só os dias que existem — ' +
+      '<b>estão abaixo do real</b>.' +
+      (a.cobertura.ehMesAtual && a.cobertura.gastoMetaMes
+        ? ' O próprio Meta informa <b>' + moeda(a.cobertura.gastoMetaMes) + '</b> de gasto no mês (aba Janelas), que é o número do Gerenciador.'
+        : '') +
+      ' <b>Providência:</b> no Apps Script, execute <b>sincronizarCompleta</b> e acompanhe a aba <b>_Sync</b>; ' +
+      'a incremental de hora em hora cobre 35 dias, então isso só acontece na primeira carga ou se o script ficou parado.'));
   }
   if (a.ultimaData) {
     const atraso = Math.round((hojeZerado() - a.ultimaData) / 86400000);

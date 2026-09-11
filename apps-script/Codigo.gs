@@ -59,7 +59,10 @@ var ABA = {
 var PADRAO_CONFIG = {
   META_AD_ACCOUNTS: '106339469723880,731383791781450',
   DATA_INICIO: '2025-01-01',
-  DIAS_INCREMENTAL: '7',
+  /* 35, e nao 7: a incremental de hora em hora passa a cobrir o mes vigente
+     inteiro, e o "mes atual" do painel nunca depende de o historico ter
+     terminado. Sao ~40 campanhas x 35 dias por hora — leve para a API. */
+  DIAS_INCREMENTAL: '35',
   TOKEN_WEBAPP: 'bm-metaads',
   /* Tipos de acao do Meta que contam como lead, por familia. O painel mostra
      as tres separadas e soma as que LEAD_TOTAL indicar. Conferir uma vez
@@ -201,7 +204,15 @@ function sincronizarCompleta() {
 
 function continuarSincronizacao() {
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) return;
+  if (!lock.tryLock(5000)) {
+    /* Sair calado aqui deixava a tela em "Iniciando histórico… 0%" para
+       sempre. Diz o motivo e tenta de novo em 1 minuto. */
+    gravarSync_({ status: 'rodando', etapa: 'completa',
+                  mensagem: 'Outra execução está com a planilha (provavelmente a incremental de hora em hora). Tentando de novo em 1 min…' });
+    limparGatilhosContinuacao_();
+    ScriptApp.newTrigger('continuarSincronizacao').timeBased().after(60 * 1000).create();
+    return;
+  }
   var t0 = Date.now();
   try {
     limparGatilhosContinuacao_();
@@ -216,6 +227,10 @@ function continuarSincronizacao() {
         var ini = new Date(cur.mes + '-01T00:00:00');
         var fim = new Date(ini.getFullYear(), ini.getMonth() + 1, 0);
         if (fim > hoje_()) fim = hoje_();
+        /* Antes da chamada, não depois: se o Meta demorar, a tela mostra em
+           que mês travou em vez de "0%". */
+        gravarSync_({ status: 'rodando', etapa: 'completa',
+                      mensagem: 'Conta ' + contas[cur.conta] + ' · buscando ' + cur.mes + '…' });
         cur.gravadas += sincronizarPeriodo_(contas[cur.conta], ini, fim);
         cur.mes = proximoMes_(cur.mes);
         props_().setProperty('cursor', JSON.stringify(cur));
@@ -406,30 +421,33 @@ function atualizarJanelasEAnuncios_() {
     dia a dia volta vazio. Resultado no Registro de execucao. */
 function depurarInsights() {
   var conta = contas_()[0];
-  var fim = hoje_(), ini = new Date(fim.getTime() - 2 * 86400000);
-  var since = iso_(ini), until = iso_(fim);
+  var hoje = hoje_();
+  var ini3 = new Date(hoje.getTime() - 2 * 86400000);
+  var iniMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  var tr = function (a, b) { return JSON.stringify({ since: iso_(a), until: iso_(b) }); };
+  var minimo = 'campaign_id,campaign_name,spend,impressions,clicks,inline_link_clicks,actions';
   var variantes = [
-    ['A: time_range JSON + time_increment=1',
-      { level: 'campaign', time_increment: 1, fields: 'campaign_name,spend', limit: 50,
-        time_range: JSON.stringify({ since: since, until: until }) }],
-    ['B: time_range[since]/[until] + time_increment=1',
-      { level: 'campaign', time_increment: 1, fields: 'campaign_name,spend', limit: 50,
-        'time_range[since]': since, 'time_range[until]': until }],
-    ['C: date_preset=last_7d + time_increment=1',
-      { level: 'campaign', time_increment: 1, fields: 'campaign_name,spend', limit: 50,
-        date_preset: 'last_7d' }],
-    ['D: time_range JSON SEM time_increment',
-      { level: 'campaign', fields: 'campaign_name,spend', limit: 50,
-        time_range: JSON.stringify({ since: since, until: until }) }]
+    ['E: EXATO da sincronização (mês atual, campos completos, limit 500)',
+      { level: 'campaign', time_increment: 1, time_range: tr(iniMes, hoje), fields: CAMPOS_INSIGHT, limit: 500 }],
+    ['F: mês atual, campos completos, limit 100',
+      { level: 'campaign', time_increment: 1, time_range: tr(iniMes, hoje), fields: CAMPOS_INSIGHT, limit: 100 }],
+    ['G: mês atual, campos mínimos, limit 500',
+      { level: 'campaign', time_increment: 1, time_range: tr(iniMes, hoje), fields: minimo, limit: 500 }],
+    ['H: 3 dias, campos completos, limit 500',
+      { level: 'campaign', time_increment: 1, time_range: tr(ini3, hoje), fields: CAMPOS_INSIGHT, limit: 500 }],
+    ['I: 3 dias, campos mínimos, limit 50',
+      { level: 'campaign', time_increment: 1, time_range: tr(ini3, hoje), fields: minimo, limit: 50 }]
   ];
-  var saida = ['conta ' + conta + ' · ' + since + ' a ' + until];
+  var saida = ['conta ' + conta + ' · mês desde ' + iso_(iniMes) + ' · hoje ' + iso_(hoje)];
   variantes.forEach(function (v) {
     try {
       var r = chamarMeta_('act_' + conta + '/insights', v[1]);
       var n = (r.data || []).length;
       var ex = n ? r.data[0] : null;
-      saida.push(v[0] + ' -> ' + n + ' linha(s)' +
-        (ex ? ' · ex.: ' + (ex.date_start || '?') + ' ' + String(ex.campaign_name || '').slice(0, 30) + ' R$ ' + ex.spend : ''));
+      var temProx = !!(r.paging && r.paging.next);
+      saida.push(v[0] + ' -> ' + n + ' linha(s)' + (temProx ? ' (+ próxima página)' : '') +
+        (ex ? ' · ex.: ' + (ex.date_start || '?') + ' ' + String(ex.campaign_name || '').slice(0, 24) + ' R$ ' + ex.spend
+            : ' · corpo: ' + JSON.stringify(r).slice(0, 220)));
     } catch (e) {
       saida.push(v[0] + ' -> ERRO: ' + e.message);
     }
