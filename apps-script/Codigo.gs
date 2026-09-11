@@ -222,6 +222,10 @@ function continuarSincronizacao() {
     if (!cur) return;
     var contas = contas_();
     var mesFinal = iso_(hoje_()).slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(String(cur.mes))) {
+      props_().deleteProperty('cursor');
+      throw new Error('DATA_INICIO inválida na aba _Config: "' + cfg_('DATA_INICIO') + '". Use AAAA-MM-DD.');
+    }
     var totalMeses = mesesEntre_(cfg_('DATA_INICIO').slice(0, 7), mesFinal) * contas.length;
 
     while (cur.conta < contas.length) {
@@ -651,10 +655,23 @@ function cfg_(chave) {
     var ult = aba.getLastRow();
     if (ult > 1) {
       var v = aba.getRange(2, 1, ult - 1, 2).getValues();
-      for (var i = 0; i < v.length; i++) if (String(v[i][0]) === chave) return String(v[i][1]);
+      for (var i = 0; i < v.length; i++) if (String(v[i][0]) === chave) return cfgTexto_(v[i][1]);
     }
   }
   return PADRAO_CONFIG[chave];
+}
+
+/* A planilha converte "2026-01-01" em DATA ao gravar. Lido de volta vem um
+   Date, e String(Date) e "Thu Jan 01 2026 00:00:00 GMT-0300 (...)". Foi isso
+   que fez o historico "concluir" com 0 linhas: o mes inicial do cursor virou
+   "Thu Jan", a comparacao com "2026-09" deu falso e o laco nunca rodou. A
+   incremental nao passa por DATA_INICIO — por isso ela funcionava. */
+function cfgTexto_(v) {
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    var tz = planilha_().getSpreadsheetTimeZone ? planilha_().getSpreadsheetTimeZone() : Session.getScriptTimeZone();
+    return Utilities.formatDate(v, tz, 'yyyy-MM-dd');
+  }
+  return String(v == null ? '' : v).trim();
 }
 
 function contas_() {
