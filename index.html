@@ -1,0 +1,1942 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<script>
+/* Central BM — o caminho normal é entrar pela central, que repassa a sessão e
+   abre o painel sem segunda digitação. Mas cada dashboard tem o seu próprio
+   cofre AES-GCM: o acesso direto continua protegido pelo cofre, não por este
+   trecho. Por isso aqui só se ajusta a moldura — nunca se bloqueia a página.
+
+   A versão anterior chamava location.replace(PORTAL) em dois casos, e os dois
+   quebravam o uso em iPad e celular:
+
+   1. Sempre que a página abria fora do iframe. Aba nova, favorito e atalho da
+      tela de início caíam na central — e o Safari, ao contrário do Chrome, não
+      copia o sessionStorage para a aba nova, então a central também pedia
+      login outra vez. Do lado de quem usa, o dashboard não abria.
+
+   2. Sempre que o sessionStorage não respondia. Com "Bloquear todos os
+      cookies" ligado, ou em navegação privada, ler o storage lança exceção; o
+      catch deixava ok=false e mandava para a central, que pelo mesmo motivo
+      não guardava sessão — laço infinito de login.
+
+   Agora, sem sessão do portal a página simplesmente mostra o próprio login. */
+(function () {
+  if (location.protocol === 'file:' ||
+      location.hostname === 'localhost' || location.hostname === '127.0.0.1') return;
+  /* Dentro da central quem oferece "Sair" é a moldura, não o painel. Ser um
+     iframe é fato do DOM e não depende de storage — que é exatamente o que
+     falha no Safari com cookies bloqueados. */
+  if (window.self !== window.top) document.documentElement.setAttribute('data-portal', '1');
+})();
+</script>
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Campanhas Meta Ads | Borges Macedo</title>
+<link rel="icon" type="image/png" href="favicon.png" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  * { -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: #0f1117;
+    --bg2: #161b26;
+    --bg3: #1e2536;
+    --bg4: #232c42;
+    --azul: #2563eb;
+    --azul-claro: #3b82f6;
+    --verde: #22c55e;
+    --verde-fraco: rgba(34,197,94,0.13);
+    --vermelho: #ef4444;
+    --vermelho-fraco: rgba(239,68,68,0.13);
+    --amarelo: #f59e0b;
+    --amarelo-fraco: rgba(245,158,11,0.13);
+    --roxo: #a855f7;
+    --ciano: #06b6d4;
+    --texto: #e2e8f0;
+    --texto-muted: #64748b;
+    --borda: #1e2d4a;
+    --radius: 12px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+
+  html { font-size: 15px; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--texto);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    padding-bottom: 3rem;
+    overflow-x: hidden;
+  }
+
+  /* ===== CABEÇALHO ===== */
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 1rem;
+    padding: 1rem 1.75rem;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--borda);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .header-logo { display: flex; align-items: center; gap: 0.75rem; }
+  .logo-img { height: 38px; width: auto; object-fit: contain; }
+  .logo-text { display: flex; flex-direction: column; line-height: 1.2; }
+  .logo-name { font-size: 0.95rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+  .logo-sub { font-size: 0.63rem; color: var(--texto-muted); letter-spacing: 0.1em; text-transform: uppercase; }
+  .header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; }
+  .header-updated { font-size: 0.72rem; color: var(--texto-muted); }
+  .btn-atualizar {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.4rem 0.85rem; background: transparent;
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+    color: var(--texto); font-size: 0.8rem; font-weight: 500;
+    cursor: pointer; font-family: inherit; transition: background .15s, border-color .15s;
+  }
+  .btn-atualizar:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.3); }
+
+  /* ===== LAYOUT ===== */
+  .container { max-width: 1500px; margin: 0 auto; padding: 1.5rem 1.75rem; }
+  .secao { margin-bottom: 2rem; }
+  .secao-titulo {
+    display: flex; align-items: center; gap: 0.6rem;
+    font-size: 0.95rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; margin-bottom: 0.35rem;
+  }
+  .secao-titulo::before { content: ''; width: 3px; height: 17px; background: var(--azul-claro); border-radius: 2px; }
+  .secao-sub { font-size: 0.78rem; color: var(--texto-muted); margin-bottom: 1rem; margin-left: 0.9rem; }
+
+  .card {
+    background: var(--bg2); border: 1px solid var(--borda);
+    border-radius: var(--radius); padding: 1.15rem; box-shadow: var(--shadow);
+  }
+
+  /* ===== KPIs ===== */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0.9rem; }
+  .kpi { position: relative; overflow: hidden; }
+  .kpi::after { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--azul-claro); }
+  .kpi.verde::after { background: var(--verde); }
+  .kpi.vermelho::after { background: var(--vermelho); }
+  .kpi.amarelo::after { background: var(--amarelo); }
+  .kpi.roxo::after { background: var(--roxo); }
+  .kpi-topo { display:flex; align-items:center; justify-content:space-between; gap:.5rem; margin-bottom:.55rem; }
+  .kpi-nome { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--texto-muted); font-weight: 700; }
+  .kpi-pct {
+    font-size: 0.72rem; font-weight: 800; padding: 0.15rem 0.45rem; border-radius: 6px; white-space: nowrap;
+  }
+  .kpi-pct.verde { background: var(--verde-fraco); color: var(--verde); }
+  .kpi-pct.vermelho { background: var(--vermelho-fraco); color: var(--vermelho); }
+  .kpi-pct.amarelo { background: var(--amarelo-fraco); color: var(--amarelo); }
+  .kpi-pct.neutro { background: var(--bg3); color: var(--texto-muted); }
+  .kpi-valor { font-size: 1.55rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
+  .kpi-rodape { margin-top: 0.6rem; padding-top: 0.55rem; border-top: 1px solid var(--borda); font-size: 0.75rem; color: var(--texto-muted); display:flex; flex-direction:column; gap:.2rem; }
+  .kpi-rodape span b { color: var(--texto); font-weight: 600; }
+
+  /* ===== BARRA DE PROGRESSO ===== */
+  .barra-fundo { height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; margin-top: .5rem; }
+  .barra-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
+
+  /* ===== TABELAS ===== */
+  .tabela-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.83rem; min-width: 640px; }
+  thead th {
+    text-align: right; padding: 0.6rem 0.7rem; font-size: 0.67rem; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--texto-muted); font-weight: 700;
+    border-bottom: 1px solid var(--borda); white-space: nowrap; background: var(--bg2);
+    position: sticky; top: 0;
+  }
+  thead th:first-child { text-align: left; }
+  tbody td { padding: 0.55rem 0.7rem; text-align: right; border-bottom: 1px solid rgba(30,45,74,0.5); white-space: nowrap; }
+  tbody td:first-child { text-align: left; white-space: normal; }
+  tbody tr.destaque { background: rgba(255,255,255,0.04); }
+  tbody tr.destaque td { font-weight: 800; border-top: 1px solid var(--borda); }
+  .tag-pct { font-weight: 800; padding: 0.1rem 0.5rem; border-radius: 5px; font-size: 0.76rem; display:inline-block; }
+  .tag-pct.verde { background: var(--verde-fraco); color: var(--verde); }
+  .tag-pct.vermelho { background: var(--vermelho-fraco); color: var(--vermelho); }
+  .tag-pct.amarelo { background: var(--amarelo-fraco); color: var(--amarelo); }
+  .tag-pct.neutro { background: var(--bg3); color: var(--texto-muted); }
+  .val-neg { color: var(--vermelho); font-weight: 600; }
+  .val-pos { color: var(--verde); font-weight: 600; }
+
+  /* ===== FILTROS (CHIPS) ===== */
+  .filtros { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-bottom: 0.9rem; }
+  .filtros .sep { width: 1px; align-self: stretch; background: var(--borda); margin: 0 0.35rem; }
+  .chip {
+    background: var(--bg3); border: 1px solid var(--borda); border-radius: 999px;
+    color: var(--texto-muted); font-size: 0.74rem; font-weight: 600; font-family: inherit;
+    padding: 0.3rem 0.75rem; cursor: pointer; transition: all .15s; white-space: nowrap;
+  }
+  .chip:hover { color: var(--texto); border-color: rgba(255,255,255,0.25); }
+  .chip.ativo { background: var(--azul); border-color: var(--azul); color: #fff; }
+  .tag-aba {
+    display: inline-block; padding: 0.12rem 0.5rem; border-radius: 5px;
+    font-size: 0.7rem; font-weight: 700; white-space: nowrap;
+  }
+
+  /* ===== GRÁFICOS ===== */
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(370px, 1fr)); gap: 1rem; }
+  .grafico-box { position: relative; width: 100%; }
+  .grafico-box.alto { height: 360px; }
+  .grafico-box.medio { height: 300px; }
+
+  /* ===== RESUMO POR ABA ===== */
+  .resumo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.9rem; margin-bottom: 1rem; }
+  .resumo-item { background: var(--bg3); border: 1px solid var(--borda); border-radius: 10px; padding: 0.9rem; }
+  .resumo-nome { font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--texto-muted); font-weight: 700; margin-bottom: 0.35rem; }
+  .resumo-valor { font-size: 1.25rem; font-weight: 800; letter-spacing: -0.02em; }
+  .resumo-nota { font-size: 0.71rem; color: var(--texto-muted); margin-top: 0.25rem; }
+
+  /* ===== OBSERVAÇÕES ===== */
+  .obs-lista { display: flex; flex-direction: column; gap: 0.6rem; }
+  .obs {
+    display: flex; gap: 0.75rem; padding: 0.8rem 0.95rem;
+    background: var(--bg3); border-radius: 10px;
+    border-left: 3px solid var(--texto-muted);
+  }
+  .obs.critico { border-left-color: var(--vermelho); background: rgba(239,68,68,0.07); }
+  .obs.atencao { border-left-color: var(--amarelo); background: rgba(245,158,11,0.06); }
+  .obs.bom { border-left-color: var(--verde); background: rgba(34,197,94,0.06); }
+  .obs.info { border-left-color: var(--azul-claro); }
+  .obs-icone { font-size: 1rem; line-height: 1.35; flex-shrink: 0; }
+  .obs-corpo { flex: 1; min-width: 0; }
+  .obs-titulo { font-size: 0.85rem; font-weight: 700; margin-bottom: 0.15rem; }
+  .obs-texto { font-size: 0.8rem; color: var(--texto-muted); line-height: 1.5; }
+  .obs-texto b { color: var(--texto); font-weight: 600; }
+  .obs-vazio { padding: 1.5rem; text-align: center; color: var(--texto-muted); font-size: 0.85rem; }
+
+  /* ===== ESTADOS ===== */
+  .estado { padding: 3rem 1.5rem; text-align: center; color: var(--texto-muted); }
+  .spinner {
+    width: 34px; height: 34px; margin: 0 auto 1rem;
+    border: 3px solid var(--bg3); border-top-color: var(--azul-claro);
+    border-radius: 50%; animation: girar .8s linear infinite;
+  }
+  @keyframes girar { to { transform: rotate(360deg); } }
+  .erro-box {
+    background: rgba(239,68,68,0.1); border: 1px solid var(--vermelho);
+    border-radius: var(--radius); padding: 1rem; margin: 1rem 1.75rem;
+    color: #fca5a5; font-size: 0.85rem; line-height: 1.5;
+  }
+  .oculto { display: none !important; }
+
+  .rodape { text-align: center; font-size: 0.72rem; color: var(--texto-muted); padding: 1.5rem; line-height: 1.7; }
+  .rodape a { color: var(--azul-claro); text-decoration: none; }
+
+  /* ===== TELA DE LOGIN ===== */
+  .login-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    background: radial-gradient(circle at 50% 0%, #1a2338 0%, var(--bg) 62%);
+    display: flex; align-items: center; justify-content: center; padding: 1.25rem;
+  }
+  .login-caixa {
+    width: 100%; max-width: 372px;
+    background: var(--bg2); border: 1px solid var(--borda);
+    border-radius: 16px; padding: 2rem 1.75rem;
+    box-shadow: 0 18px 60px rgba(0,0,0,0.55);
+  }
+  .login-logo { display: block; height: 46px; margin: 0 auto 1.15rem; object-fit: contain; }
+  .login-titulo { text-align: center; font-size: 1.02rem; font-weight: 700; letter-spacing: 0.02em; }
+  .login-sub {
+    text-align: center; font-size: 0.72rem; color: var(--texto-muted);
+    text-transform: uppercase; letter-spacing: 0.1em; margin-top: 0.25rem; margin-bottom: 1.6rem;
+  }
+  .campo-grupo { margin-bottom: 0.9rem; }
+  .campo-rotulo {
+    display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--texto-muted); font-weight: 700; margin-bottom: 0.35rem;
+  }
+  .campo-texto {
+    width: 100%; background: var(--bg3); border: 1px solid var(--borda);
+    color: var(--texto); border-radius: 9px; padding: 0.68rem 0.85rem;
+    font-size: 0.92rem; font-family: inherit; outline: none; transition: border-color .15s;
+  }
+  .campo-texto:focus { border-color: var(--azul-claro); }
+  .campo-texto::placeholder { color: #47536b; }
+  .btn-entrar {
+    width: 100%; margin-top: 0.5rem; padding: 0.72rem;
+    background: var(--azul); border: none; border-radius: 9px;
+    color: #fff; font-size: 0.92rem; font-weight: 700; font-family: inherit;
+    cursor: pointer; transition: background .15s;
+  }
+  .btn-entrar:hover:not(:disabled) { background: var(--azul-claro); }
+  .btn-entrar:disabled { opacity: 0.6; cursor: default; }
+  .login-erro {
+    margin-top: 0.9rem; padding: 0.6rem 0.75rem; border-radius: 8px;
+    background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.45);
+    color: #fca5a5; font-size: 0.79rem; line-height: 1.45; text-align: center;
+  }
+  .login-rodape {
+    margin-top: 1.35rem; padding-top: 1rem; border-top: 1px solid var(--borda);
+    font-size: 0.7rem; color: var(--texto-muted); text-align: center; line-height: 1.55;
+  }
+  .btn-sair {
+    background: transparent; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+    color: var(--texto-muted); font-size: 0.75rem; font-family: inherit;
+    padding: 0.3rem 0.6rem; cursor: pointer; transition: all .15s;
+  }
+  .btn-sair:hover { color: var(--vermelho); border-color: var(--vermelho); }
+  /* Dentro da central o encerramento de sessão é feito pela própria central */
+  html[data-portal] .btn-sair { display: none; }
+
+  @media (max-width: 720px) {
+    html { font-size: 14px; }
+    .header { padding: 0.85rem 1rem; }
+    .container { padding: 1.1rem 1rem; }
+    .kpi-valor { font-size: 1.3rem; }
+    .grafico-box.alto { height: 300px; }
+    .grafico-box.medio { height: 260px; }
+  }
+
+  /* ===== BUSCA ===== */
+  .busca-wrap { position: relative; flex: 1 1 260px; min-width: 220px; max-width: 420px; }
+  .busca {
+    width: 100%; background: var(--bg3); border: 1px solid var(--borda); color: var(--texto);
+    border-radius: 9px; padding: 0.5rem 2rem 0.5rem 2rem; font-size: 0.85rem;
+    font-family: inherit; outline: none; transition: border-color .15s;
+  }
+  .busca:focus { border-color: var(--azul-claro); }
+  .busca::placeholder { color: #47536b; }
+  .busca-icone {
+    position: absolute; left: 0.6rem; top: 50%; transform: translateY(-50%);
+    color: var(--texto-muted); font-size: 0.85rem; pointer-events: none;
+  }
+  .busca-limpar {
+    position: absolute; right: 0.45rem; top: 50%; transform: translateY(-50%);
+    background: transparent; border: none; color: var(--texto-muted);
+    font-size: 1rem; cursor: pointer; padding: 0 .2rem; line-height: 1; font-family: inherit;
+  }
+  .busca-limpar:hover { color: var(--vermelho); }
+
+  /* ===== LINHAS CLICÁVEIS ===== */
+  tbody tr.clicavel { cursor: pointer; transition: background .12s; }
+  tbody tr.clicavel:hover { background: rgba(59,130,246,0.10); }
+  tbody tr.clicavel:hover td:first-child { box-shadow: inset 3px 0 0 var(--azul-claro); }
+  .dica-clique {
+    font-size: 0.72rem; color: var(--texto-muted); margin-left: auto;
+    display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap;
+  }
+
+  /* ===== MODAL DE DETALHE ===== */
+  .modal-fundo {
+    position: fixed; inset: 0; z-index: 900;
+    background: rgba(5,8,15,0.72); backdrop-filter: blur(2px);
+    display: flex; align-items: center; justify-content: center; padding: 1.25rem;
+    opacity: 0; transition: opacity .16s;
+  }
+  .modal-fundo.aberto { opacity: 1; }
+  .modal {
+    width: 100%; max-width: 660px; max-height: 88vh; overflow-y: auto;
+    background: var(--bg2); border: 1px solid var(--borda); border-radius: 14px;
+    box-shadow: 0 24px 70px rgba(0,0,0,0.6);
+    transform: translateY(8px); transition: transform .16s;
+  }
+  .modal-fundo.aberto .modal { transform: translateY(0); }
+  .modal::-webkit-scrollbar { width: 9px; }
+  .modal::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 5px; }
+  .modal-topo {
+    display: flex; align-items: flex-start; gap: 1rem;
+    padding: 1.15rem 1.35rem 0.9rem; border-bottom: 1px solid var(--borda);
+    position: sticky; top: 0; background: var(--bg2); z-index: 2;
+    border-radius: 14px 14px 0 0;
+  }
+  .modal-titulo { font-size: 1.02rem; font-weight: 800; line-height: 1.3; letter-spacing: -0.01em; }
+  .modal-sub { font-size: 0.78rem; color: var(--texto-muted); margin-top: 0.2rem; line-height: 1.45; }
+  .modal-fechar {
+    margin-left: auto; flex-shrink: 0; background: transparent;
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+    color: var(--texto-muted); font-size: 1.05rem; line-height: 1;
+    padding: 0.32rem 0.55rem; cursor: pointer; font-family: inherit; transition: all .15s;
+  }
+  .modal-fechar:hover { color: var(--vermelho); border-color: var(--vermelho); }
+  .modal-corpo { padding: 1.1rem 1.35rem 1.35rem; }
+  .modal-bloco { margin-bottom: 1.15rem; }
+  .modal-bloco:last-child { margin-bottom: 0; }
+  .modal-bloco-titulo {
+    font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--texto-muted); font-weight: 700; margin-bottom: 0.5rem;
+    padding-bottom: 0.3rem; border-bottom: 1px solid var(--borda);
+  }
+  .modal-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.7rem 1.1rem; }
+  .modal-campo { min-width: 0; }
+  .modal-campo.largo { grid-column: 1 / -1; }
+  .modal-rotulo {
+    font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--texto-muted); font-weight: 700; margin-bottom: 0.15rem;
+  }
+  .modal-valor { font-size: 0.9rem; font-weight: 600; word-break: break-word; line-height: 1.45; }
+  .modal-valor.grande { font-size: 1.15rem; font-weight: 800; letter-spacing: -0.02em; }
+  .modal-valor.muted { color: var(--texto-muted); font-weight: 500; }
+  .modal-valor.texto { font-weight: 500; white-space: pre-wrap; font-size: 0.85rem; }
+  .modal-nota {
+    margin-top: 0.9rem; padding: 0.7rem 0.85rem; border-radius: 9px;
+    background: var(--bg3); border-left: 3px solid var(--azul-claro);
+    font-size: 0.8rem; color: var(--texto-muted); line-height: 1.55;
+  }
+  .modal-nota.alerta { border-left-color: var(--amarelo); background: rgba(245,158,11,0.07); }
+  .modal-nota.critico { border-left-color: var(--vermelho); background: rgba(239,68,68,0.07); }
+  .modal-nota b { color: var(--texto); }
+  .modal-acoes { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.1rem; }
+  .modal-acao {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.45rem 0.8rem; border-radius: 8px; text-decoration: none;
+    background: var(--bg3); border: 1px solid var(--borda);
+    color: var(--texto); font-size: 0.8rem; font-weight: 600;
+    font-family: inherit; cursor: pointer; transition: all .15s;
+  }
+  .modal-acao:hover { border-color: var(--azul-claro); color: #fff; }
+
+  @media (max-width: 720px) {
+    .modal { max-height: 92vh; }
+    .modal-campos { grid-template-columns: 1fr; }
+  }
+
+  /* ===== CARTÃO KPI CLICÁVEL ===== */
+  .kpi-clicavel { cursor: pointer; transition: background .14s, border-color .14s, transform .14s; }
+  .kpi-clicavel:hover {
+    background: var(--bg3); border-color: rgba(59,130,246,.4); transform: translateY(-2px);
+  }
+  .kpi-clicavel::before {
+    content: '\21F2'; position: absolute; right: .6rem; bottom: .5rem;
+    font-size: .8rem; color: var(--texto-muted); opacity: 0; transition: opacity .14s;
+  }
+  .kpi-clicavel:hover::before { opacity: .85; }
+
+  /* ===== TABELA DENTRO DO MODAL ===== */
+  .modal-tabela-wrap { overflow-x: auto; border: 1px solid var(--borda); border-radius: 10px; }
+  .modal-tabela { width: 100%; border-collapse: collapse; font-size: .81rem; min-width: 420px; }
+  .modal-tabela thead th {
+    position: sticky; top: 0; background: var(--bg3);
+    text-align: left; padding: .55rem .7rem; font-size: .64rem;
+    text-transform: uppercase; letter-spacing: .06em; color: var(--texto-muted);
+    font-weight: 700; white-space: nowrap; border-bottom: 1px solid var(--borda);
+  }
+  .modal-tabela thead th.dir, .modal-tabela td.dir { text-align: right; }
+  .modal-tabela tbody td {
+    padding: .5rem .7rem; border-bottom: 1px solid rgba(30,45,74,.5);
+    vertical-align: top; line-height: 1.45;
+  }
+  .modal-tabela tbody tr:last-child td { border-bottom: none; }
+  .modal-tabela tbody tr:hover { background: rgba(255,255,255,.03); }
+  .modal-lista-nota { font-size: .74rem; color: var(--texto-muted); margin-top: .55rem; }
+  .modal-lista-total {
+    margin-top: .8rem; padding: .7rem .9rem; border-radius: 9px;
+    background: var(--bg3); border: 1px solid var(--borda);
+    font-size: .85rem; font-weight: 600;
+  }
+  .modal-lista-total b { color: var(--azul-claro); }
+  .resumo-item.item-clicavel { cursor: pointer; transition: background .14s, border-color .14s; }
+  .resumo-item.item-clicavel:hover { background: var(--bg4); border-color: rgba(59,130,246,.4); }
+  /* ── duas páginas ── */
+  .abas-topo { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin:0 0 1rem; }
+  .aba-btn { padding:.55rem 1.05rem; border-radius:9px; border:1px solid var(--borda); background:var(--card);
+             color:var(--texto-muted); font-weight:700; cursor:pointer; font-size:.86rem; font-family:inherit; }
+  .aba-btn:hover { color:var(--texto); }
+  .aba-btn.ativo { background:var(--azul); border-color:var(--azul); color:#fff; }
+  .abas-nota { margin-left:auto; font-size:.78rem; color:var(--texto-muted); }
+  .btn-sec { padding:.5rem .8rem; border-radius:8px; border:1px solid var(--borda); background:var(--card);
+             color:var(--texto); cursor:pointer; font-size:.8rem; font-family:inherit; }
+  .btn-sec:hover { border-color:var(--azul-claro); }
+  .btn-sec:disabled { opacity:.55; cursor:default; }
+  .filtro-linha { display:flex; gap:.7rem; align-items:flex-start; flex-wrap:wrap; margin-bottom:.4rem; }
+  .filtro-rotulo { font-size:.7rem; text-transform:uppercase; letter-spacing:.07em; color:var(--texto-muted);
+                   min-width:62px; padding-top:.5rem; }
+  .filtro-campo { display:flex; align-items:center; gap:.4rem; font-size:.78rem; color:var(--texto-muted); }
+  .filtro-campo .campo-texto { width:auto; min-width:120px; padding:.35rem .5rem; font-size:.8rem; }
+  .pagina.oculto { display:none; }
+  .tabela-wrap tfoot td { font-weight:700; border-top:1px solid var(--borda); }
+  @media (max-width:760px) { .abas-nota { margin-left:0; width:100%; } .filtro-rotulo { min-width:100%; padding-top:0; } }
+
+</style>
+</head>
+<body>
+
+<div class="login-overlay" id="loginOverlay">
+  <form class="login-caixa" id="loginForm" autocomplete="on">
+    <img src="logo.png" alt="Borges Macedo Advocacia" class="login-logo" onerror="this.style.display='none'" />
+    <div class="login-titulo">Campanhas Meta Ads</div>
+    <div class="login-sub">Acesso restrito</div>
+
+    <div class="campo-grupo">
+      <label class="campo-rotulo" for="campoUsuario">Login</label>
+      <input class="campo-texto" type="text" id="campoUsuario" name="username"
+             autocomplete="username" placeholder="Usuário" required />
+    </div>
+    <div class="campo-grupo">
+      <label class="campo-rotulo" for="campoSenha">Senha</label>
+      <input class="campo-texto" type="password" id="campoSenha" name="password"
+             autocomplete="current-password" placeholder="••••••••" required />
+    </div>
+
+    <button type="submit" class="btn-entrar" id="btnEntrar">Entrar</button>
+    <div class="login-erro oculto" id="loginErro"></div>
+
+    <div class="login-rodape">
+      Painel exclusivo das lideranças.<br />
+      A sessão termina ao fechar a aba.
+    </div>
+  </form>
+</div>
+
+<header class="header oculto" id="cabecalho">
+  <div class="header-logo">
+    <img src="logo.png" alt="Borges Macedo Advocacia" class="logo-img" onerror="this.style.display='none'" />
+    <div class="logo-text">
+      <span class="logo-name">Campanhas Meta Ads</span>
+      <span class="logo-sub">Borges Macedo Advocacia · Resultado das campanhas e visão do gestor de tráfego</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div style="display:flex;gap:.4rem;align-items:center">
+      <button class="btn-atualizar" id="btnAtualizar">&#10227; Atualizar</button>
+      <button class="btn-sair" id="btnSair" title="Encerrar a sessão">Sair</button>
+    </div>
+    <span class="header-updated" id="atualizadoEm">—</span>
+  </div>
+</header>
+
+<div id="erroBox" class="erro-box oculto"></div>
+
+<div id="carregando" class="estado oculto">
+  <div class="spinner"></div>
+  Carregando dados da planilha…
+</div>
+
+<main class="container oculto" id="conteudo">
+  <div class="abas-topo">
+    <button type="button" class="aba-btn ativo" data-pagina="resultados">Resultados das campanhas</button>
+    <button type="button" class="aba-btn" data-pagina="gestor">Visão do gestor de tráfego</button>
+    <span class="abas-nota" id="syncInfo">—</span>
+    <button type="button" class="btn-sec" id="btnSincronizar" title="Pede ao Apps Script para buscar dados novos no Meta">&#8635; Buscar no Meta</button>
+    <button type="button" class="btn-sec" id="btnCfgWebapp" title="URL do Web App do Apps Script">&#9881;</button>
+  </div>
+
+  <!-- ═════════════════════════ PÁGINA 1 — RESULTADOS ═════════════════════════ -->
+  <div class="pagina" id="pag-resultados">
+
+    <section class="secao">
+      <div class="filtro-linha">
+        <span class="filtro-rotulo">Período</span>
+        <div class="filtros" id="filtrosPeriodo">
+          <button type="button" class="chip ativo" data-periodo="mes">Mês atual</button>
+          <button type="button" class="chip" data-periodo="30d">Últimos 30 dias</button>
+          <button type="button" class="chip" data-periodo="3m">Últimos 3 meses</button>
+          <button type="button" class="chip" data-periodo="ano">Este ano</button>
+          <div class="sep"></div>
+          <label class="filtro-campo">Mês
+            <select class="campo-texto" id="selMes"><option value="">—</option></select>
+          </label>
+          <label class="filtro-campo">De <input type="date" class="campo-texto" id="dtIni"></label>
+          <label class="filtro-campo">Até <input type="date" class="campo-texto" id="dtFim"></label>
+          <button type="button" class="chip" id="btnPeriodo">Aplicar período</button>
+        </div>
+      </div>
+      <div class="filtro-linha" id="linhaContas" style="display:none">
+        <span class="filtro-rotulo">Conta</span>
+        <div class="filtros" id="filtrosConta"></div>
+      </div>
+      <div class="secao-sub" id="subPeriodo">&mdash;</div>
+    </section>
+
+    <section class="secao">
+      <div class="secao-titulo">Resumo do período</div>
+      <div class="secao-sub">Gasto e leads vêm do Meta, dia a dia. Retorno e clientes vêm do <b>Fluxo de Clientes</b>:
+        fechamentos com <b>pagamento confirmado</b>, pela <b>data do fechamento</b>, cujo campo ORIGEM casa com o nome da campanha.
+        O gasto do mês é comparado com o fechamento do mês, ainda que o primeiro contato tenha sido antes.</div>
+      <div class="kpis" id="kpis"></div>
+    </section>
+
+    <section class="secao">
+      <div class="secao-titulo">Campanha a campanha</div>
+      <div class="secao-sub">CPL = gasto ÷ leads · Conversão = clientes ÷ leads · CAC = gasto ÷ clientes · ROI = retorno ÷ gasto (quanto voltou por R$ 1).
+        Orçamento mensal = orçamento diário × dias do mês corrente.</div>
+      <div class="card">
+        <div class="tabela-wrap">
+          <table id="tabelaCampanhas">
+            <thead><tr>
+              <th>Campanha</th><th>Status</th><th>Orç. diário</th><th>Orç. mensal</th><th>Gasto</th>
+              <th>Leads</th><th>CPL</th><th>Clientes</th><th>Retorno</th><th>Conversão</th><th>CAC</th><th>ROI</th>
+            </tr></thead>
+            <tbody id="corpoCampanhas"></tbody>
+            <tfoot id="rodapeCampanhas"></tfoot>
+          </table>
+        </div>
+        <div class="dica-clique">&#128065; clique numa campanha para ver os fechamentos e o dia a dia</div>
+      </div>
+    </section>
+
+    <section class="secao">
+      <div class="grid-2">
+        <div class="card">
+          <div class="secao-sub" style="margin:0 0 .6rem 0">Gasto × retorno por campanha</div>
+          <div class="grafico-box medio"><canvas id="grafGastoRetorno"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="secao-sub" style="margin:0 0 .6rem 0">Leads e gasto, dia a dia</div>
+          <div class="grafico-box medio"><canvas id="grafDiario"></canvas></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="secao">
+      <div class="secao-titulo">Como o Fluxo de Clientes foi ligado às campanhas</div>
+      <div class="secao-sub" id="subMapeamento">&mdash;</div>
+      <div class="card">
+        <div class="tabela-wrap">
+          <table id="tabelaMapeamento">
+            <thead><tr><th>Origem no Fluxo de Clientes</th><th>Campanha no Meta</th><th>Como casou</th>
+              <th>Fechamentos no período</th><th>Retorno no período</th></tr></thead>
+            <tbody id="corpoMapeamento"></tbody>
+          </table>
+        </div>
+        <div class="secao-sub" style="margin:.6rem 0 0 0">Para corrigir um casamento, preencha a aba <b>Mapeamento</b> da planilha
+          <i>Campanhas Meta Ads</i> (Origem → nome exato da campanha). O que estiver lá vence o casamento automático.</div>
+      </div>
+    </section>
+
+    <section class="secao">
+      <div class="secao-titulo">Pontos de atenção</div>
+      <div class="obs-lista" id="obsResultados"></div>
+    </section>
+  </div>
+
+  <!-- ═══════════════════════ PÁGINA 2 — GESTOR DE TRÁFEGO ═══════════════════════ -->
+  <div class="pagina oculto" id="pag-gestor">
+
+    <section class="secao">
+      <div class="filtro-linha">
+        <span class="filtro-rotulo">Janela</span>
+        <div class="filtros" id="filtrosJanela">
+          <button type="button" class="chip" data-janela="7d">Últimos 7 dias</button>
+          <button type="button" class="chip ativo" data-janela="30d">Últimos 30 dias</button>
+          <button type="button" class="chip" data-janela="mes">Mês atual</button>
+        </div>
+      </div>
+      <div class="secao-sub">Alcance, frequência, CPM e CTR não somam entre dias — por isso esta página lê janelas fechadas
+        calculadas pelo próprio Meta, não o dia a dia. A comparação <b>7 dias × 30 dias</b> é o que mostra tendência.</div>
+    </section>
+
+    <section class="secao">
+      <div class="secao-titulo">Indicações</div>
+      <div class="secao-sub">Geradas pelas regras que um gestor de tráfego aplica: fadiga de criativo, CTR baixo, CPM subindo, CPL piorando,
+        entrega abaixo do orçamento, dependência de um único anúncio. Cada uma diz o que olhar e o que fazer.</div>
+      <div class="obs-lista" id="obsGestor"></div>
+    </section>
+
+    <section class="secao">
+      <div class="secao-titulo">Saúde da entrega na janela</div>
+      <div class="kpis" id="kpisGestor"></div>
+    </section>
+
+    <section class="secao">
+      <div class="secao-titulo">Campanhas — métricas de mídia</div>
+      <div class="secao-sub">Referências usadas nos semáforos: CTR do link ≥ 1% bom, &lt; 0,7% fraco · frequência ≤ 2 boa, &gt; 3 fadiga ·
+        visualização da página ≥ 70% dos cliques no link boa, &lt; 50% problema de carregamento · entrega ≥ 80% do orçamento normal.</div>
+      <div class="card">
+        <div class="tabela-wrap">
+          <table id="tabelaMidia">
+            <thead><tr>
+              <th>Campanha</th><th>Gasto</th><th>Entrega</th><th>Impressões</th><th>Alcance</th><th>Freq.</th>
+              <th>CPM</th><th>CTR link</th><th>CPC</th><th>Cliques link</th><th>Pág. vista</th><th>Leads</th><th>CPL</th><th>Tend. CPL</th>
+            </tr></thead>
+            <tbody id="corpoMidia"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="secao">
+      <div class="secao-titulo">Anúncios — qual criativo está ganhando</div>
+      <div class="secao-sub">Um anúncio por linha, do que mais gasta para o que menos gasta. O diagnóstico combina CTR, frequência e custo por lead
+        do anúncio contra a média da própria campanha.</div>
+      <div class="card">
+        <div class="filtros" id="filtrosAnuncios"><span id="buscaCampo"></span></div>
+        <div class="tabela-wrap">
+          <table id="tabelaAnuncios">
+            <thead><tr>
+              <th>Anúncio</th><th>Campanha / conjunto</th><th>Gasto</th><th>% da campanha</th><th>Impressões</th><th>Freq.</th>
+              <th>CTR link</th><th>CPM</th><th>Leads</th><th>CPL</th><th>Diagnóstico</th>
+            </tr></thead>
+            <tbody id="corpoAnuncios"></tbody>
+          </table>
+        </div>
+        <div class="secao-sub" id="notaAnuncios" style="margin:.6rem 0 0 0"></div>
+      </div>
+    </section>
+
+    <section class="secao">
+      <div class="grid-2">
+        <div class="card">
+          <div class="secao-sub" style="margin:0 0 .6rem 0">CTR do link por campanha (7 × 30 dias)</div>
+          <div class="grafico-box medio"><canvas id="grafCtr"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="secao-sub" style="margin:0 0 .6rem 0">CPL por campanha (7 × 30 dias)</div>
+          <div class="grafico-box medio"><canvas id="grafCpl"></canvas></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+</main>
+
+<footer class="rodape">
+  Borges Macedo Advocacia · Resultado das campanhas e visão do gestor de tráfego · Atualização automática a cada 5 min<br />
+  <a href="#" id="linkPlanilha" target="_blank" rel="noopener">Abrir planilha no Google Sheets</a>
+</footer>
+
+<script>
+/* =========================================================================
+   COFRES — {SHEET_ID, GOOGLE_API_KEY} cifrados com AES-256-GCM, um cofre por
+   perfil autorizado. Este painel é exclusivo das lideranças: só os perfis
+   Administração e Lideranças têm cofre aqui. Sem a credencial correta a
+   decifragem falha e a página não sabe qual planilha ler.
+   ========================================================================= */
+const COFRES = [
+/* Administração */
+  {"v":1,"it":310000,"salt":"IfyZ9to5uYuGMZwr2alizA==","iv":"4zc3lCfcLXp+8LdQ","ct":"npsInYjUhPellj58dgkkcNn5Um8Go6ZVyz+5+FBooX/e/a9+y1q42aE6vtryn7+9k/99QbxAXdMbcW7HpIUozHMQJxfg7Rq7gR/j8ePTb/MnFg62p/gEwQMs4Hd0p2hs39fZTNJBjqLgyJCRaVgiiXenGIF/N+cLOXq6m0L8KpiV5iYIt6jNiKejHiVvPbpAJRWRbYcApZbWwuwnETyaR+YokLi5x8URfMYlhjZMruD2UwPRX7g4ZUATj8yvOiQsXJXbbpQ0"},
+  /* Lideranças */
+  {"v":1,"it":310000,"salt":"vHQoqH4nSN7eS1dxUULd7g==","iv":"StVOPIplqF1LEQyq","ct":"5GS03b7cHfRSZ14MCPXRelCYEWisaUXDD7r+nKgaNu1jbzjpEYVAiI4pthtMf8PHvVmFEZA+MpfiLO115TUoWoUxmjfHN7V0pDrUWbqSlJXAjfn09dIanmx+LfPdj61Ll9NtL7BZEmqF4ZMZBc7llzI8oMQYBmSLxjGq+llbNW7uMk/fcTHPgeQcgPtQVLQ7wXy/Af4QifztBaQ8tq6gSkhIpeB8myhuyeNawnc5nU3+QADw0GG18q9r0Yfa71FJc7a44cBa"}
+];
+
+const b64bytes = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+const normUsuario = u => u.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+async function abrirUmCofre(cofre, usuario, senha) {
+  const enc = new TextEncoder();
+  const material = await crypto.subtle.importKey(
+    'raw', enc.encode(normUsuario(usuario) + '\n' + senha), 'PBKDF2', false, ['deriveKey']);
+  const chave = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: b64bytes(cofre.salt), iterations: cofre.it, hash: 'SHA-256' },
+    material, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  const claro = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: b64bytes(cofre.iv) }, chave, b64bytes(cofre.ct));
+  return JSON.parse(new TextDecoder().decode(claro));
+}
+
+async function abrirCofre(usuario, senha) {
+  for (const cofre of COFRES) {
+    try { return await abrirUmCofre(cofre, usuario, senha); } catch (e) {}
+  }
+  throw new Error('credenciais sem acesso a este painel');
+}
+
+const CONFIG = { SHEET_ID: null, GOOGLE_API_KEY: null, AUTO_REFRESH_MIN: 5 };
+
+/* ===== utilitários comuns ===== */
+const fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const fmtBRL0 = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+const fmtNum = new Intl.NumberFormat('pt-BR');
+function moeda(v) { return fmtBRL.format(v || 0); }
+function moedaCurta(v) { return fmtBRL0.format(v || 0); }
+function num(v) { return fmtNum.format(v || 0); }
+function pct1(v) { return (v === null || !isFinite(v)) ? '—' : v.toFixed(1).replace('.', ',') + '%'; }
+function pct0(v) { return (v === null || !isFinite(v)) ? '—' : Math.round(v) + '%'; }
+
+function parseNumBR(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  if (v === null || v === undefined) return 0;
+  let t = String(v).replace(/\u00a0/g, ' ').trim();
+  if (t === '' || t === '-') return 0;
+  t = t.replace(/R\$/gi, '').replace(/\s/g, '');
+  if (t === '' || t === '-') return 0;
+  const negativo = t.startsWith('-') || /^\(.*\)$/.test(t);
+  t = t.replace(/[()\-+]/g, '');
+  t = t.replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(t);
+  if (!isFinite(n)) return 0;
+  return negativo ? -n : n;
+}
+
+/** dd/mm/aaaa -> Date. Datas-fantasma do Sheets (1899/1900) contam como vazio. */
+function parseDataBR(v) {
+  if (!v) return null;
+  const m = String(v).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!m) return null;
+  let ano = Number(m[3]);
+  if (ano < 100) ano += 2000;
+  if (ano < 1950) return null;
+  const dt = new Date(ano, Number(m[2]) - 1, Number(m[1]));
+  return isNaN(dt.getTime()) ? null : dt;
+}
+
+const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const MESES_CURTO = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+const MESES_NORM = MESES.map(m => m.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase());
+
+/** "Agosto/25", "Agosto/2025" -> {ano, mes}. "Dezembro/99" = vazio. */
+function parseMesRotulo(v) {
+  if (!v) return null;
+  const t = String(v).trim();
+  const m = t.match(/^([A-Za-zÀ-ÿ]+)\s*\/\s*(\d{2,4})$/);
+  if (!m) return null;
+  const nome = m[1].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const idx = MESES_NORM.findIndex(x => x === nome);
+  if (idx < 0) return null;
+  let ano = Number(m[2]);
+  if (ano < 100) ano += 2000;
+  if (ano < 2015 || ano > 2100) return null;   // Dezembro/99 -> 2099, descartado
+  return { ano, mes: idx };
+}
+function ordemMes(i) { return i.ano * 12 + i.mes; }
+function labelMes(i) { return MESES_CURTO[i.mes] + '/' + String(i.ano).slice(2); }
+function labelMesData(d) { return MESES_CURTO[d.getMonth()] + '/' + String(d.getFullYear()).slice(2); }
+function hojeZerado() { const h = new Date(); h.setHours(0,0,0,0); return h; }
+function diasEntre(a, b) { return Math.round((b - a) / 86400000); }
+
+function colIdx(letra) {
+  let n = 0;
+  for (const c of letra.toUpperCase()) n = n * 26 + (c.charCodeAt(0) - 64);
+  return n - 1;
+}
+
+/** Lê uma célula por nome de cabeçalho, com fallback pela letra da coluna. */
+function campo(linha, cab, nome, letra) {
+  let i = cab.indexOf(nome);
+  if (i < 0 && letra) i = colIdx(letra);
+  if (i < 0) return '';
+  const v = linha[i];
+  return v === undefined || v === null ? '' : String(v).trim();
+}
+
+/* ===== leitura via Sheets API v4 ===== */
+async function lerAbas(ranges) {
+  const base = 'https://sheets.googleapis.com/v4/spreadsheets/' + CONFIG.SHEET_ID + '/values:batchGet';
+  const p = new URLSearchParams();
+  ranges.forEach(r => p.append('ranges', r));
+  p.append('valueRenderOption', 'FORMATTED_VALUE');
+  p.append('key', CONFIG.GOOGLE_API_KEY);
+  const resp = await fetch(base + '?' + p.toString(), { cache: 'no-store' });
+  if (!resp.ok) throw new Error('Sheets API ' + resp.status);
+  const json = await resp.json();
+  return (json.valueRanges || []).map(vr => vr.values || []);
+}
+
+/** Separa cabeçalho e linhas com conteúdo; remove repetições do cabeçalho no meio. */
+function tabela(rows) {
+  if (!rows || !rows.length) return { cab: [], linhas: [] };
+  const cab = rows[0].map(h => String(h).trim());
+  const assinatura = cab.filter(Boolean).slice(0, 3).join('|');
+  const linhas = rows.slice(1).filter(r => {
+    if (!r.some(c => String(c).trim())) return false;
+    const sig = r.map(c => String(c).trim()).filter(Boolean).slice(0, 3).join('|');
+    return sig !== assinatura;
+  });
+  return { cab, linhas };
+}
+
+/* ===== gráficos ===== */
+Chart.defaults.color = '#94a3b8';
+Chart.defaults.font.family = "'Segoe UI', system-ui, -apple-system, sans-serif";
+Chart.defaults.font.size = 12;
+Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
+Chart.defaults.plugins.legend.labels.usePointStyle = true;
+Chart.defaults.plugins.legend.labels.boxWidth = 8;
+Chart.defaults.plugins.legend.labels.padding = 14;
+
+const COR_AZUL = '#3b82f6', COR_VERDE = '#22c55e', COR_VERMELHO = '#ef4444',
+      COR_AMARELO = '#f59e0b', COR_ROXO = '#a855f7', COR_CIANO = '#06b6d4',
+      COR_ROSA = '#ec4899', COR_MUTED = '#64748b', COR_BORDA = 'rgba(255,255,255,0.06)';
+const PALETA = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#a855f7','#06b6d4','#ec4899','#84cc16','#f97316','#14b8a6','#8b5cf6','#eab308'];
+
+let graficos = {};
+function destruir(id) { if (graficos[id]) { graficos[id].destroy(); delete graficos[id]; } }
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+}
+
+function cartaoKPI(nome, valor, cor, rodape, pct) {
+  return '<div class="card kpi ' + cor + '">' +
+    '<div class="kpi-topo"><span class="kpi-nome">' + nome + '</span>' +
+    (pct !== undefined && pct !== null ? '<span class="kpi-pct ' + (cor === 'vermelho' ? 'vermelho' : cor === 'amarelo' ? 'amarelo' : cor === 'verde' ? 'verde' : 'neutro') + '">' + pct + '</span>' : '') +
+    '</div><div class="kpi-valor">' + valor + '</div>' +
+    (rodape ? '<div class="kpi-rodape"><span>' + rodape + '</span></div>' : '') + '</div>';
+}
+function itemResumo(nome, valor, nota, cor) {
+  return '<div class="resumo-item"><div class="resumo-nome"' + (cor ? ' style="color:' + cor + '"' : '') + '>' + nome + '</div>' +
+    '<div class="resumo-valor">' + valor + '</div>' +
+    '<div class="resumo-nota">' + (nota || '') + '</div></div>';
+}
+function obsCard(tipo, icone, titulo, texto) {
+  return '<div class="obs ' + tipo + '"><div class="obs-icone">' + icone + '</div><div class="obs-corpo">' +
+    '<div class="obs-titulo">' + titulo + '</div><div class="obs-texto">' + texto + '</div></div></div>';
+}
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function topN(mapa, n, rotuloOutros) {
+  const e = Object.entries(mapa).sort((a, b) => b[1] - a[1]);
+  const topo = e.slice(0, n);
+  const resto = e.slice(n).reduce((s, [, v]) => s + v, 0);
+  if (resto > 0) topo.push([rotuloOutros || 'Outros', resto]);
+  return topo;
+}
+
+/* =========================================================================
+   DETALHE EM JANELA (MODAL)
+   Uso: abrirDetalhe({ titulo, sub, blocos:[{titulo, campos:[{r,v,largo,classe}]}],
+                       notas:[{tipo,html}], acoes:[{rotulo,href}] })
+   Linhas de tabela viram clicáveis com `tabelaClicavel(tbodyId, lista, montador)`.
+   ========================================================================= */
+(function () {
+  const fundo = document.createElement('div');
+  fundo.className = 'modal-fundo oculto';
+  fundo.id = 'modalFundo';
+  fundo.innerHTML =
+    '<div class="modal" role="dialog" aria-modal="true">' +
+      '<div class="modal-topo">' +
+        '<div><div class="modal-titulo" id="modalTitulo"></div>' +
+        '<div class="modal-sub" id="modalSub"></div></div>' +
+        '<button class="modal-fechar" id="modalFechar" title="Fechar (Esc)">&#10005;</button>' +
+      '</div>' +
+      '<div class="modal-corpo" id="modalCorpo"></div>' +
+    '</div>';
+  document.body.appendChild(fundo);
+
+  fundo.addEventListener('click', ev => { if (ev.target === fundo) fecharDetalhe(); });
+  document.getElementById('modalFechar').addEventListener('click', fecharDetalhe);
+  document.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape' && !fundo.classList.contains('oculto')) fecharDetalhe();
+  });
+})();
+
+function fecharDetalhe() {
+  const f = document.getElementById('modalFundo');
+  f.classList.remove('aberto');
+  setTimeout(() => f.classList.add('oculto'), 160);
+}
+
+function abrirDetalhe(cfg) {
+  const f = document.getElementById('modalFundo');
+  document.getElementById('modalTitulo').innerHTML = cfg.titulo || '';
+  document.getElementById('modalSub').innerHTML = cfg.sub || '';
+
+  let html = '';
+  (cfg.blocos || []).forEach(bl => {
+    const campos = (bl.campos || []).filter(c => c && c.v !== undefined && c.v !== null && c.v !== '');
+    if (!campos.length) return;
+    html += '<div class="modal-bloco">' +
+      (bl.titulo ? '<div class="modal-bloco-titulo">' + bl.titulo + '</div>' : '') +
+      '<div class="modal-campos">' +
+      campos.map(c =>
+        '<div class="modal-campo' + (c.largo ? ' largo' : '') + '">' +
+        '<div class="modal-rotulo">' + c.r + '</div>' +
+        '<div class="modal-valor ' + (c.classe || '') + '">' + c.v + '</div></div>'
+      ).join('') + '</div></div>';
+  });
+  (cfg.notas || []).forEach(n => {
+    if (!n || !n.html) return;
+    html += '<div class="modal-nota ' + (n.tipo || '') + '">' + n.html + '</div>';
+  });
+  if (cfg.acoes && cfg.acoes.length) {
+    html += '<div class="modal-acoes">' + cfg.acoes.filter(Boolean).map(a =>
+      '<a class="modal-acao" href="' + a.href + '" target="_blank" rel="noopener">' + a.rotulo + '</a>'
+    ).join('') + '</div>';
+  }
+  document.getElementById('modalCorpo').innerHTML = html ||
+    '<div style="color:var(--texto-muted);font-size:.85rem">Sem dados detalhados para este registro.</div>';
+
+  f.classList.remove('oculto');
+  requestAnimationFrame(() => f.classList.add('aberto'));
+}
+
+/** Marca as linhas de um tbody como clicáveis e liga cada uma ao seu registro. */
+function tabelaClicavel(tbodyId, lista, montador) {
+  const tb = document.getElementById(tbodyId);
+  if (!tb) return;
+  Array.from(tb.querySelectorAll('tr')).forEach((tr, i) => {
+    if (i >= lista.length || !lista[i]) return;
+    tr.classList.add('clicavel');
+    tr.title = 'Clique para ver os detalhes';
+    tr.addEventListener('click', () => abrirDetalhe(montador(lista[i])));
+  });
+}
+
+/** Rótulo padrão avisando que a tabela é clicável. */
+function dicaClique(texto) {
+  return '<span class="dica-clique">&#128065; ' + (texto || 'clique em uma linha para ver os detalhes') + '</span>';
+}
+
+/* =========================================================================
+   BUSCA
+   ========================================================================= */
+/** Normaliza para busca: sem acento, minúsculo, só dígitos preservados. */
+function chaveBusca(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+/** Termo casa se todas as palavras aparecerem no texto; dígitos comparam só dígitos. */
+function casaBusca(termo, ...campos) {
+  const t = chaveBusca(termo);
+  if (!t) return true;
+  const texto = campos.map(c => chaveBusca(c)).join(' ');
+  const soDig = texto.replace(/\D/g, '');
+  return t.split(/\s+/).every(p => {
+    if (/^\d{3,}$/.test(p)) return soDig.includes(p) || texto.includes(p);
+    return texto.includes(p);
+  });
+}
+/** Monta o HTML de um campo de busca. */
+function campoBusca(id, placeholder) {
+  return '<div class="busca-wrap">' +
+    '<span class="busca-icone">&#128269;</span>' +
+    '<input type="search" class="busca" id="' + id + '" placeholder="' + placeholder + '" autocomplete="off" />' +
+    '<button type="button" class="busca-limpar oculto" id="' + id + 'Limpar" title="Limpar">&#10005;</button></div>';
+}
+/** Liga o campo de busca a um callback, com debounce curto. */
+function ligarBusca(id, aoDigitar) {
+  const el = document.getElementById(id);
+  const limpar = document.getElementById(id + 'Limpar');
+  if (!el) return;
+  let t = null;
+  const disparar = () => {
+    limpar.classList.toggle('oculto', !el.value);
+    clearTimeout(t);
+    t = setTimeout(() => aoDigitar(el.value), 120);
+  };
+  el.addEventListener('input', disparar);
+  limpar.addEventListener('click', () => { el.value = ''; el.focus(); disparar(); });
+}
+
+/* =========================================================================
+   LISTA DENTRO DO MODAL
+   Para quando o clique num cartão precisa mostrar "quais registros estão
+   por trás deste número".
+   ========================================================================= */
+/**
+ * abrirLista({ titulo, sub, colunas:[{r,chave,alinha,formata}], linhas:[obj],
+ *              vazio, rodape, notas:[{tipo,html}], limite })
+ */
+function abrirLista(cfg) {
+  const cols = cfg.colunas || [];
+  const linhas = cfg.linhas || [];
+  const limite = cfg.limite || 300;
+  const vis = linhas.slice(0, limite);
+
+  let html = '';
+  if (cfg.resumo && cfg.resumo.length) {
+    html += '<div class="modal-campos" style="margin-bottom:1rem">' +
+      cfg.resumo.map(c => '<div class="modal-campo">' +
+        '<div class="modal-rotulo">' + c.r + '</div>' +
+        '<div class="modal-valor ' + (c.classe || '') + '">' + c.v + '</div></div>').join('') +
+      '</div>';
+  }
+
+  if (!vis.length) {
+    html += '<div class="obs-vazio">' + (cfg.vazio || 'Nenhum registro para exibir.') + '</div>';
+  } else {
+    html += '<div class="modal-tabela-wrap"><table class="modal-tabela"><thead><tr>' +
+      cols.map(c => '<th' + (c.alinha === 'dir' ? ' class="dir"' : '') + '>' + c.r + '</th>').join('') +
+      '</tr></thead><tbody>' +
+      vis.map(l => '<tr>' + cols.map(c => {
+        const bruto = l[c.chave];
+        const v = c.formata ? c.formata(bruto, l) : (bruto === null || bruto === undefined || bruto === '' ? '—' : esc(bruto));
+        return '<td' + (c.alinha === 'dir' ? ' class="dir"' : '') + '>' + v + '</td>';
+      }).join('') + '</tr>').join('') +
+      '</tbody></table></div>';
+    if (linhas.length > vis.length) {
+      html += '<div class="modal-lista-nota">Exibindo os ' + vis.length + ' primeiros de ' +
+        linhas.length + ' registros.</div>';
+    } else {
+      html += '<div class="modal-lista-nota">' + linhas.length + ' registro' +
+        (linhas.length === 1 ? '' : 's') + '.</div>';
+    }
+  }
+
+  if (cfg.rodape) html += '<div class="modal-lista-total">' + cfg.rodape + '</div>';
+  (cfg.notas || []).forEach(n => {
+    if (n && n.html) html += '<div class="modal-nota ' + (n.tipo || '') + '">' + n.html + '</div>';
+  });
+
+  const f = document.getElementById('modalFundo');
+  document.getElementById('modalTitulo').innerHTML = cfg.titulo || '';
+  document.getElementById('modalSub').innerHTML = cfg.sub || '';
+  document.getElementById('modalCorpo').innerHTML = html;
+  f.classList.remove('oculto');
+  requestAnimationFrame(() => f.classList.add('aberto'));
+}
+
+/** Marca um cartão KPI como clicável e liga ao detalhamento. */
+function kpiClicavel(indice, aoAbrir) {
+  const cartoes = document.querySelectorAll('#kpis .kpi');
+  const el = cartoes[indice];
+  if (!el) return;
+  el.classList.add('kpi-clicavel');
+  el.title = 'Clique para ver os registros';
+  el.addEventListener('click', aoAbrir);
+}
+
+/** Liga vários cartões de uma vez: mapa {indice: função}. */
+function ligarKPIs(mapa) {
+  Object.keys(mapa).forEach(i => kpiClicavel(Number(i), mapa[i]));
+}
+
+
+/* =========================================================================
+   APLICAÇÃO
+   ========================================================================= */
+/* =========================================================================
+   CAMPANHAS META ADS — aplicação do painel
+
+   Fontes (todas lidas ao vivo pela API do Sheets, a cada carga):
+     · planilha "Campanhas Meta Ads" (CONFIG.SHEET_ID), alimentada pelo Apps
+       Script de hora em hora: Insights diários, Janelas, Anúncios, Campanhas,
+       Mapeamento, _Sync.
+     · planilha "Fluxo de Clientes" (CONFIG.FLUXO_SHEET_ID), aba DADOS: é de
+       lá que vêm clientes e retorno financeiro.
+
+   Duas páginas: Resultados (as KPIs pedidas, por período) e Visão do gestor
+   de tráfego (métricas de mídia por janela fechada, anúncio a anúncio, com
+   indicações).
+   ========================================================================= */
+
+const ABAS_META = ['Insights diários', 'Janelas', 'Anúncios', 'Campanhas', 'Mapeamento', '_Sync'];
+const ABA_FLUXO = 'DADOS';
+const LS_WEBAPP = 'bm_metaads_webapp';
+const LS_TOKEN  = 'bm_metaads_token';
+
+const FILTRO = { periodo: 'mes', ini: null, fim: null, conta: 'todas', janela: '30d', busca: '' };
+let PAGINA = 'resultados';
+
+const aspas = n => "'" + String(n).replace(/'/g, "''") + "'";
+
+/* lerAbas() do kit lê só a planilha do cofre; aqui há duas. */
+async function lerAbasDe(sheetId, ranges) {
+  const p = new URLSearchParams();
+  ranges.forEach(r => p.append('ranges', r));
+  p.append('valueRenderOption', 'FORMATTED_VALUE');
+  p.append('key', CONFIG.GOOGLE_API_KEY);
+  const resp = await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + sheetId +
+    '/values:batchGet?' + p.toString(), { cache: 'no-store' });
+  if (!resp.ok) {
+    let det = ''; try { det = (await resp.json()).error.message; } catch (e) {}
+    throw new Error('Sheets API ' + resp.status + (det ? ' — ' + det : ''));
+  }
+  return ((await resp.json()).valueRanges || []).map(vr => vr.values || []);
+}
+
+async function buscarTudo() {
+  const [meta, fluxo] = await Promise.all([
+    lerAbasDe(CONFIG.SHEET_ID, ABAS_META.map(aspas)),
+    CONFIG.FLUXO_SHEET_ID ? lerAbasDe(CONFIG.FLUXO_SHEET_ID, [aspas(ABA_FLUXO)]) : Promise.resolve([[]])
+  ]);
+  const t = i => tabela(meta[i] || []);
+  return montarBase({
+    insights: t(0), janelas: t(1), anuncios: t(2), campanhas: t(3), mapeamento: t(4),
+    sync: meta[5] || [], fluxo: tabela(fluxo[0] || [])
+  });
+}
+
+/* ------------------------------------------------------------ normalização */
+const normTxt = s => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/\s+/g, ' ').trim().toLowerCase();
+const numCel = v => {
+  if (typeof v === 'number') return v;
+  const t = String(v == null ? '' : v).replace(/R\$/g, '').replace(/\s/g, '');
+  if (!t) return 0;
+  const uv = t.lastIndexOf(','), up = t.lastIndexOf('.');
+  const n = parseFloat(uv > up ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, ''));
+  return isFinite(n) ? n : 0;
+};
+const dataISO = v => {   // 'AAAA-MM-DD' ou 'dd/mm/aaaa' -> Date local
+  const s = String(v == null ? '' : v).trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+  return null;
+};
+const chaveDia = d => d ? d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') : '';
+const fmtData = d => d ? d.toLocaleDateString('pt-BR') : '—';
+const pctTxt = v => v === null || !isFinite(v) ? '—' : v.toFixed(1).replace('.', ',') + '%';
+const multTxt = v => v === null || !isFinite(v) ? '—' : 'R$ ' + v.toFixed(2).replace('.', ',');
+const divisao = (a, b) => b ? a / b : null;
+
+/* ------------------------------------------------------------- base */
+function montarBase(bruto) {
+  const c = bruto.campanhas.cab, ci = bruto.insights.cab, cj = bruto.janelas.cab,
+        ca = bruto.anuncios.cab, cm = bruto.mapeamento.cab, cf = bruto.fluxo.cab;
+
+  /* Campanhas: identidade, orçamento e status. */
+  const campanhas = {};
+  bruto.campanhas.linhas.forEach(l => {
+    const id = campo(l, c, 'ID da campanha', 'B');
+    if (!id) return;
+    campanhas[id] = {
+      id, conta: campo(l, c, 'Conta', 'A'), nome: campo(l, c, 'Campanha', 'C'),
+      status: campo(l, c, 'Status efetivo', 'E') || campo(l, c, 'Status', 'D'),
+      objetivo: campo(l, c, 'Objetivo', 'F'),
+      orcDiario: numCel(campo(l, c, 'Orçamento diário', 'G')),
+      orcVitalicio: numCel(campo(l, c, 'Orçamento vitalício', 'H')),
+      origemOrc: campo(l, c, 'Origem do orçamento', 'I'),
+      inicio: dataISO(campo(l, c, 'Início', 'K')), fim: dataISO(campo(l, c, 'Fim', 'L'))
+    };
+  });
+
+  /* Insights diários. Campanha que já saiu da aba Campanhas (excluída no
+     Meta) continua existindo no histórico — cria-se a identidade a partir
+     da própria linha. */
+  const insights = bruto.insights.linhas.map(l => {
+    const id = campo(l, ci, 'ID da campanha', 'C');
+    const nome = campo(l, ci, 'Campanha', 'D');
+    if (id && !campanhas[id]) campanhas[id] = { id, conta: campo(l, ci, 'Conta', 'B'), nome, status: 'HISTÓRICO',
+                                                 orcDiario: 0, orcVitalicio: 0, origemOrc: '', inicio: null, fim: null };
+    return {
+      data: dataISO(campo(l, ci, 'Data', 'A')), conta: campo(l, ci, 'Conta', 'B'), id, nome,
+      gasto: numCel(campo(l, ci, 'Gasto', 'E')), impressoes: numCel(campo(l, ci, 'Impressões', 'F')),
+      alcance: numCel(campo(l, ci, 'Alcance', 'G')), cliques: numCel(campo(l, ci, 'Cliques', 'H')),
+      cliquesLink: numCel(campo(l, ci, 'Cliques no link', 'I')), lpv: numCel(campo(l, ci, 'Visualizações da página', 'J')),
+      leadsForm: numCel(campo(l, ci, 'Leads (formulário)', 'K')), conversas: numCel(campo(l, ci, 'Conversas iniciadas', 'L')),
+      leadsPixel: numCel(campo(l, ci, 'Leads (pixel)', 'M')), leads: numCel(campo(l, ci, 'Leads (total)', 'N'))
+    };
+  }).filter(r => r.data && r.id);
+
+  const lerJanela = (l, cab) => ({
+    janela: campo(l, cab, 'Janela', 'A'), conta: campo(l, cab, 'Conta', 'B'),
+    id: campo(l, cab, 'ID da campanha', 'C'), nome: campo(l, cab, 'Campanha', 'D'),
+    gasto: numCel(campo(l, cab, 'Gasto')), impressoes: numCel(campo(l, cab, 'Impressões')),
+    alcance: numCel(campo(l, cab, 'Alcance')), freq: numCel(campo(l, cab, 'Frequência')),
+    cpm: numCel(campo(l, cab, 'CPM')), ctr: numCel(campo(l, cab, 'CTR (%)')), cpc: numCel(campo(l, cab, 'CPC')),
+    cliquesLink: numCel(campo(l, cab, 'Cliques no link')), ctrLink: numCel(campo(l, cab, 'CTR do link (%)')),
+    lpv: numCel(campo(l, cab, 'Visualizações da página')),
+    leadsForm: numCel(campo(l, cab, 'Leads (formulário)')), conversas: numCel(campo(l, cab, 'Conversas iniciadas')),
+    leadsPixel: numCel(campo(l, cab, 'Leads (pixel)')), leads: numCel(campo(l, cab, 'Leads (total)')),
+    cpl: numCel(campo(l, cab, 'Custo por lead'))
+  });
+  const janelas = bruto.janelas.linhas.map(l => Object.assign(lerJanela(l, cj), {
+    ini: campo(l, cj, 'Início', 'E'), fim: campo(l, cj, 'Fim', 'F') })).filter(r => r.id);
+  const anuncios = bruto.anuncios.linhas.map(l => Object.assign(lerJanela(l, ca), {
+    conjuntoId: campo(l, ca, 'ID do conjunto', 'E'), conjunto: campo(l, ca, 'Conjunto', 'F'),
+    adId: campo(l, ca, 'ID do anúncio', 'G'), anuncio: campo(l, ca, 'Anúncio', 'H') })).filter(r => r.adId);
+
+  /* Mapeamento manual: Origem -> nome exato da campanha. */
+  const manual = {};
+  bruto.mapeamento.linhas.forEach(l => {
+    const o = normTxt(campo(l, cm, 'Origem (Fluxo de Clientes)', 'A'));
+    const n = normTxt(campo(l, cm, 'Campanha (nome exato no Meta)', 'B'));
+    if (o && n) manual[o] = n;
+  });
+
+  /* Fluxo de Clientes: só o que a regra pede — pagamento confirmado, pela
+     data do fechamento, honorários iniciais como retorno. */
+  const fluxo = bruto.fluxo.linhas.map(l => ({
+    contato: dataISO(campo(l, cf, '1º CONTATO', 'A')), origem: campo(l, cf, 'ORIGEM', 'B'),
+    fechamento: dataISO(campo(l, cf, 'DATA DO FECHAMENTO', 'F')), cliente: campo(l, cf, 'CLIENTE (O MESMO DO CONTRATO)', 'Q') || campo(l, cf, 'CONTATO (QUEM ESTÁ EM CONTATO)', 'G'),
+    produto: campo(l, cf, 'PRODUTO JURÍDICO', 'H'), honorarios: numCel(campo(l, cf, 'HONORÁRIOS INICIAIS', 'K')),
+    entrada: numCel(campo(l, cf, 'VALOR DA ENTRADA', 'L')),
+    confirmado: /^sim/i.test(campo(l, cf, 'PAGAMENTO CONFIRMADO', 'N')),
+    closer: campo(l, cf, 'CLOSER', 'J')
+  })).filter(r => r.origem || r.fechamento);
+
+  const sync = {};
+  (bruto.sync || []).slice(1).forEach(l => { if (l && l[0]) sync[String(l[0])] = l[1]; });
+
+  const base = { campanhas, insights, janelas, anuncios, fluxo, manual, sync };
+  base.mapa = casarOrigens(base);
+  return base;
+}
+
+/* ------------------------------------------------- origem ↔ campanha
+   O Fluxo escreve a origem com a mesma convenção do nome da campanha —
+   "[ENG] [FORM] Rev. Plano de Saúde" — mas não é obrigado a ser idêntico.
+   Ordem: aba Mapeamento (manual) › nome igual › melhor sobreposição de
+   palavras, com as etiquetas entre colchetes pesando mais. */
+const tokens = s => normTxt(s).replace(/[\[\]()]/g, ' ').split(/[^a-z0-9]+/).filter(t => t.length > 1);
+const etiquetas = s => (String(s).match(/\[[^\]]+\]/g) || []).map(normTxt);
+
+function casarOrigens(base) {
+  const nomes = {};
+  Object.values(base.campanhas).forEach(c => { nomes[normTxt(c.nome)] = c; });
+  const lista = Object.values(base.campanhas);
+  const mapa = {};
+  const origens = [...new Set(base.fluxo.map(f => f.origem).filter(Boolean))];
+  for (const origem of origens) {
+    const o = normTxt(origem);
+    let como = 'sem campanha', campanha = null;
+    if (base.manual[o] && nomes[base.manual[o]]) { campanha = nomes[base.manual[o]]; como = 'aba Mapeamento'; }
+    else if (nomes[o]) { campanha = nomes[o]; como = 'nome idêntico'; }
+    else {
+      /* Só tenta parecer com campanha o que tem cara de campanha: etiqueta
+         entre colchetes ou nome de produto. "Orgânico" e "Indicação" não são
+         campanha e não devem ser forçados. */
+      const to = new Set(tokens(origem)), eo = etiquetas(origem);
+      let melhor = null, nota = 0;
+      for (const c of lista) {
+        const tc = new Set(tokens(c.nome)), ec = etiquetas(c.nome);
+        const comuns = [...to].filter(t => tc.has(t)).length;
+        const jac = comuns / Math.max(1, new Set([...to, ...tc]).size);
+        const etiqOk = eo.length && ec.length ? eo.filter(e => ec.includes(e)).length / Math.max(eo.length, ec.length) : 0;
+        /* Canal diferente ([FORM] × [WPP] × [LINK-WPP]) é campanha diferente,
+           por mais que o produto seja o mesmo. Creditar honorários à campanha
+           errada é pior do que deixar sem casar — sem casar aparece no aviso
+           e vai para a aba Mapeamento. */
+        const canal = arr => arr.map(e => e.replace(/[\[\]]/g, '')).find(e => /^(form|wpp|link-wpp|msg|site)$/.test(e)) || '';
+        const conflito = canal(eo) && canal(ec) && canal(eo) !== canal(ec) ? 0.2 : 0;
+        const n = jac * 0.6 + etiqOk * 0.4 - conflito;
+        if (n > nota) { nota = n; melhor = c; }
+      }
+      if (melhor && nota >= 0.6 && (eo.length || /rev\.|revisional|abins|itiv|plano|financiamento/i.test(origem))) {
+        campanha = melhor; como = 'por semelhança (' + Math.round(nota * 100) + '%)';
+      }
+    }
+    mapa[origem] = { origem, campanha, como };
+  }
+  return mapa;
+}
+
+/* ------------------------------------------------------------- período */
+function periodoAtual() {
+  const hoje = hojeZerado();
+  const p = FILTRO.periodo;
+  if (p === 'mes')  return { ini: new Date(hoje.getFullYear(), hoje.getMonth(), 1), fim: hoje, rotulo: 'mês atual (' + MESES[hoje.getMonth()] + '/' + hoje.getFullYear() + ')' };
+  if (p === '30d')  { const i = new Date(hoje); i.setDate(i.getDate() - 29); return { ini: i, fim: hoje, rotulo: 'últimos 30 dias' }; }
+  if (p === '3m')   return { ini: new Date(hoje.getFullYear(), hoje.getMonth() - 2, 1), fim: hoje, rotulo: 'últimos 3 meses' };
+  if (p === 'ano')  return { ini: new Date(hoje.getFullYear(), 0, 1), fim: hoje, rotulo: 'este ano (' + hoje.getFullYear() + ')' };
+  if (p === 'mesSel' && FILTRO.ini) { const i = FILTRO.ini; const f = new Date(i.getFullYear(), i.getMonth() + 1, 0);
+    return { ini: i, fim: f > hoje ? hoje : f, rotulo: MESES[i.getMonth()] + '/' + i.getFullYear() }; }
+  if (p === 'custom' && FILTRO.ini && FILTRO.fim) return { ini: FILTRO.ini, fim: FILTRO.fim, rotulo: fmtData(FILTRO.ini) + ' a ' + fmtData(FILTRO.fim) };
+  return { ini: new Date(hoje.getFullYear(), hoje.getMonth(), 1), fim: hoje, rotulo: 'mês atual' };
+}
+const noPeriodo = (d, per) => d && d >= per.ini && d <= per.fim;
+const daConta = r => FILTRO.conta === 'todas' || String(r.conta) === FILTRO.conta;
+
+/* ------------------------------------------------------------- análise */
+function analisar(base) {
+  const per = periodoAtual();
+  const hoje = hojeZerado();
+  const diasDoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
+
+  const porCamp = {};
+  const garantir = c => porCamp[c.id] || (porCamp[c.id] = {
+    campanha: c, gasto: 0, leads: 0, leadsForm: 0, conversas: 0, leadsPixel: 0, impressoes: 0,
+    cliquesLink: 0, dias: 0, clientes: 0, retorno: 0, entrada: 0, fechamentos: [] });
+
+  base.insights.filter(r => daConta(r) && noPeriodo(r.data, per)).forEach(r => {
+    const a = garantir(base.campanhas[r.id]);
+    a.gasto += r.gasto; a.leads += r.leads; a.leadsForm += r.leadsForm; a.conversas += r.conversas;
+    a.leadsPixel += r.leadsPixel; a.impressoes += r.impressoes; a.cliquesLink += r.cliquesLink; a.dias++;
+  });
+  /* Campanha ativa sem gasto no período ainda aparece, com zero: sumir da
+     tabela esconderia exatamente a campanha que parou de entregar. */
+  Object.values(base.campanhas).forEach(c => {
+    if (daConta(c) && c.status === 'ACTIVE' && !porCamp[c.id]) garantir(c);
+  });
+
+  /* Fechamentos do período, pela regra: pagamento confirmado + data do fechamento. */
+  const fechamentos = base.fluxo.filter(f => f.confirmado && noPeriodo(f.fechamento, per));
+  const semCampanha = [];
+  fechamentos.forEach(f => {
+    const m = base.mapa[f.origem];
+    if (m && m.campanha && (FILTRO.conta === 'todas' || String(m.campanha.conta) === FILTRO.conta)) {
+      const a = garantir(m.campanha);
+      a.clientes++; a.retorno += f.honorarios; a.entrada += f.entrada; a.fechamentos.push(f);
+    } else semCampanha.push(f);
+  });
+
+  const linhas = Object.values(porCamp).map(a => {
+    const c = a.campanha;
+    a.orcDiario = c.orcDiario; a.orcMensal = c.orcVitalicio && !c.orcDiario ? c.orcVitalicio : c.orcDiario * diasDoMes;
+    a.cpl = divisao(a.gasto, a.leads); a.conversao = divisao(a.clientes, a.leads);
+    a.cac = divisao(a.gasto, a.clientes); a.roi = divisao(a.retorno, a.gasto);
+    return a;
+  }).sort((x, y) => y.gasto - x.gasto);
+
+  const tot = linhas.reduce((t, a) => {
+    t.gasto += a.gasto; t.leads += a.leads; t.clientes += a.clientes; t.retorno += a.retorno; t.entrada += a.entrada;
+    t.orcDiario += a.campanha.status === 'ACTIVE' ? a.orcDiario : 0;
+    t.orcMensal += a.campanha.status === 'ACTIVE' ? a.orcMensal : 0;
+    return t;
+  }, { gasto: 0, leads: 0, clientes: 0, retorno: 0, entrada: 0, orcDiario: 0, orcMensal: 0 });
+  tot.cpl = divisao(tot.gasto, tot.leads); tot.conversao = divisao(tot.clientes, tot.leads);
+  tot.cac = divisao(tot.gasto, tot.clientes); tot.roi = divisao(tot.retorno, tot.gasto);
+
+  /* Série diária do período (todas as campanhas do recorte). */
+  const porDia = {};
+  base.insights.filter(r => daConta(r) && noPeriodo(r.data, per)).forEach(r => {
+    const k = chaveDia(r.data);
+    (porDia[k] = porDia[k] || { dia: r.data, gasto: 0, leads: 0 });
+    porDia[k].gasto += r.gasto; porDia[k].leads += r.leads;
+  });
+  const serie = Object.values(porDia).sort((a, b) => a.dia - b.dia);
+
+  const ultimaData = base.insights.reduce((m, r) => !m || r.data > m ? r.data : m, null);
+  return { per, linhas, tot, fechamentos, semCampanha, serie, ultimaData, diasDoMes };
+}
+
+/* ================================================================ RENDER */
+function render(base) {
+  if (!controlesProntos) { montarControles(base); controlesProntos = true; }
+  pintarSync(base);
+  const a = analisar(base);
+  renderResultados(base, a);
+  renderGestor(base);
+  mostrarPagina(PAGINA);
+}
+
+let controlesProntos = false;
+function montarControles(base) {
+  /* meses disponíveis, do mais novo ao mais velho */
+  const meses = new Map();
+  base.insights.forEach(r => { const k = r.data.getFullYear() * 12 + r.data.getMonth(); meses.set(k, r.data); });
+  const sel = document.getElementById('selMes');
+  [...meses.keys()].sort((a, b) => b - a).forEach(k => {
+    const d = meses.get(k), o = document.createElement('option');
+    o.value = d.getFullYear() + '-' + (d.getMonth() + 1);
+    o.textContent = MESES[d.getMonth()] + '/' + d.getFullYear();
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change', () => {
+    if (!sel.value) return;
+    const [a, m] = sel.value.split('-').map(Number);
+    FILTRO.periodo = 'mesSel'; FILTRO.ini = new Date(a, m - 1, 1);
+    marcarChip(document.getElementById('filtrosPeriodo'), null);
+    if (DADOS) render(DADOS);
+  });
+  document.getElementById('filtrosPeriodo').addEventListener('click', ev => {
+    const b = ev.target.closest('.chip[data-periodo]'); if (!b) return;
+    FILTRO.periodo = b.dataset.periodo; sel.value = '';
+    marcarChip(document.getElementById('filtrosPeriodo'), b);
+    if (DADOS) render(DADOS);
+  });
+  document.getElementById('btnPeriodo').addEventListener('click', () => {
+    const i = dataISO(document.getElementById('dtIni').value), f = dataISO(document.getElementById('dtFim').value);
+    if (!i || !f || f < i) return;
+    FILTRO.periodo = 'custom'; FILTRO.ini = i; FILTRO.fim = f; sel.value = '';
+    marcarChip(document.getElementById('filtrosPeriodo'), document.getElementById('btnPeriodo'));
+    if (DADOS) render(DADOS);
+  });
+
+  const contas = [...new Set(Object.values(base.campanhas).map(c => String(c.conta)).filter(Boolean))];
+  if (contas.length > 1) {
+    const box = document.getElementById('filtrosConta');
+    box.innerHTML = '<button type="button" class="chip ativo" data-conta="todas">Todas</button>' +
+      contas.map(c => '<button type="button" class="chip" data-conta="' + esc(c) + '">' + esc(c) + '</button>').join('');
+    document.getElementById('linhaContas').style.display = '';
+    box.addEventListener('click', ev => {
+      const b = ev.target.closest('.chip'); if (!b) return;
+      FILTRO.conta = b.dataset.conta; marcarChip(box, b);
+      if (DADOS) render(DADOS);
+    });
+  }
+  document.getElementById('filtrosJanela').addEventListener('click', ev => {
+    const b = ev.target.closest('.chip'); if (!b) return;
+    FILTRO.janela = b.dataset.janela; marcarChip(document.getElementById('filtrosJanela'), b);
+    if (DADOS) renderGestor(DADOS);
+  });
+  document.querySelectorAll('.aba-btn').forEach(b => b.addEventListener('click', () => mostrarPagina(b.dataset.pagina)));
+  document.getElementById('buscaCampo').innerHTML = campoBusca('inputBusca', 'Anúncio, conjunto ou campanha…');
+  ligarBusca('inputBusca', v => { FILTRO.busca = v; if (DADOS) renderAnuncios(DADOS); });
+  document.getElementById('btnSincronizar').addEventListener('click', pedirSincronizacao);
+  document.getElementById('btnCfgWebapp').addEventListener('click', () => abrirConfigWebapp());
+}
+function marcarChip(box, ativo) {
+  box.querySelectorAll('.chip').forEach(c => c.classList.toggle('ativo', c === ativo));
+}
+function mostrarPagina(p) {
+  PAGINA = p;
+  document.querySelectorAll('.aba-btn').forEach(b => b.classList.toggle('ativo', b.dataset.pagina === p));
+  document.getElementById('pag-resultados').classList.toggle('oculto', p !== 'resultados');
+  document.getElementById('pag-gestor').classList.toggle('oculto', p !== 'gestor');
+}
+
+/* ---------- sincronização com o Apps Script ---------- */
+/* URL publicada do Web App. Nao e segredo (a protecao e o token conferido no
+   doGet); fica aqui para o botao funcionar sem configuracao. O que for salvo
+   no botao de engrenagem tem prioridade. */
+const WEBAPP_PADRAO = 'https://script.google.com/a/macros/borgesmacedoadvocacia.com.br/s/AKfycbwT_TWUwXOOHs5mKFigRIJQAKKR2JX-h_CTY8_hNfYhdEnaUncAYDgsNVE7y8OZFp6l/exec';
+const webapp = () => { try { return (localStorage.getItem(LS_WEBAPP) || WEBAPP_PADRAO).trim(); } catch (e) { return WEBAPP_PADRAO; } };
+const tokenWebapp = () => { try { return (localStorage.getItem(LS_TOKEN) || 'bm-metaads').trim(); } catch (e) { return 'bm-metaads'; } };
+function abrirConfigWebapp(msg) {
+  const u = prompt((msg ? msg + '\n\n' : '') + 'URL do Web App do Apps Script (…/exec):', webapp());
+  if (u !== null) { try { localStorage.setItem(LS_WEBAPP, u.trim()); } catch (e) {} }
+  const t = prompt('Token do Web App (TOKEN_WEBAPP na aba _Config):', tokenWebapp());
+  if (t !== null) { try { localStorage.setItem(LS_TOKEN, t.trim()); } catch (e) {} }
+}
+async function pedirSincronizacao() {
+  const url = webapp();
+  if (!url) { abrirConfigWebapp('Cole a URL do Web App para o painel poder pedir dados novos ao Meta.'); return; }
+  const btn = document.getElementById('btnSincronizar');
+  btn.disabled = true; btn.textContent = '⏳ Pedindo ao Meta…';
+  const link = url + (url.indexOf('?') < 0 ? '?' : '&') + 'acao=atualizar&token=' + encodeURIComponent(tokenWebapp());
+  try { await fetch(link); } catch (e) { try { await fetch(link, { mode: 'no-cors' }); } catch (e2) {} }
+  /* A busca no Meta leva de segundos a minutos; relê a planilha em 40 s e o
+     estado (_Sync) diz se já terminou. */
+  setTimeout(() => { btn.disabled = false; btn.textContent = '↻ Buscar no Meta'; carregarDados(); }, 40000);
+}
+function pintarSync(base) {
+  const s = base.sync || {};
+  const el = document.getElementById('syncInfo');
+  const rod = String(s.status || '') === 'rodando';
+  el.innerHTML = rod
+    ? '<b>Buscando no Meta…</b> ' + esc(String(s.progresso || 0)) + '% · ' + esc(String(s.mensagem || '').slice(0, 80))
+    : (s.ultimaOk ? 'Meta lido em <b>' + esc(String(s.ultimaOk)) + '</b>' : '<b>Apps Script ainda não sincronizou</b>') +
+      (s.ultimoErro ? ' · <span style="color:var(--vermelho)">' + esc(String(s.ultimoErro).slice(0, 90)) + '</span>' : '');
+}
+
+/* ---------- página 1 ---------- */
+function renderResultados(base, a) {
+  const { per, linhas, tot } = a;
+  document.getElementById('subPeriodo').innerHTML =
+    'Recorte: <b>' + esc(per.rotulo) + '</b> — ' + fmtData(per.ini) + ' a ' + fmtData(per.fim) +
+    (a.ultimaData ? ' · último dia com dados do Meta: <b>' + fmtData(a.ultimaData) + '</b>' : ' · <b>sem dados do Meta ainda</b>') +
+    (FILTRO.conta !== 'todas' ? ' · conta <b>' + esc(FILTRO.conta) + '</b>' : '');
+
+  const corRoi = tot.roi === null ? 'azul' : tot.roi >= 3 ? 'verde' : tot.roi >= 1 ? 'amarelo' : 'vermelho';
+  document.getElementById('kpis').innerHTML = [
+    cartaoKPI('Valor gasto', moeda(tot.gasto), 'azul',
+      '<span>' + num(linhas.filter(l => l.gasto > 0).length) + ' campanha(s) com gasto no período</span>'),
+    cartaoKPI('Orçamento diário', moeda(tot.orcDiario), 'azul',
+      '<span>campanhas ativas · <b>' + moeda(tot.orcMensal) + '</b> no mês (× ' + a.diasDoMes + ' dias)</span>'),
+    cartaoKPI('Leads', num(tot.leads), 'roxo',
+      '<span>' + num(linhas.reduce((s, l) => s + l.leadsForm, 0)) + ' formulário · ' +
+      num(linhas.reduce((s, l) => s + l.conversas, 0)) + ' conversas</span>'),
+    cartaoKPI('Custo por lead', tot.cpl === null ? '—' : moeda(tot.cpl), tot.cpl === null ? 'azul' : tot.cpl <= 50 ? 'verde' : tot.cpl <= 120 ? 'amarelo' : 'vermelho',
+      '<span>gasto ÷ leads</span>'),
+    cartaoKPI('Clientes fechados', num(tot.clientes), 'verde',
+      '<span>pagamento confirmado, pela data do fechamento · ' + num(a.semCampanha.length) + ' fora de campanha</span>'),
+    cartaoKPI('Retorno financeiro', moeda(tot.retorno), 'verde',
+      '<span>honorários iniciais · entrada de <b>' + moeda(tot.entrada) + '</b></span>'),
+    cartaoKPI('Conversão lead → cliente', pctTxt(tot.conversao === null ? null : tot.conversao * 100),
+      tot.conversao === null ? 'azul' : tot.conversao >= 0.05 ? 'verde' : tot.conversao >= 0.02 ? 'amarelo' : 'vermelho',
+      '<span>clientes ÷ leads</span>'),
+    cartaoKPI('CAC', tot.cac === null ? '—' : moeda(tot.cac), 'azul', '<span>gasto ÷ clientes</span>'),
+    cartaoKPI('ROI', tot.roi === null ? '—' : multTxt(tot.roi), corRoi,
+      '<span>retorno para cada R$ 1 investido</span>')
+  ].join('');
+  ligarKPIs({
+    4: () => listaFechamentos('Clientes fechados no período', a.fechamentos.filter(f => base.mapa[f.origem] && base.mapa[f.origem].campanha), base),
+    5: () => listaFechamentos('Retorno financeiro no período', a.fechamentos.filter(f => base.mapa[f.origem] && base.mapa[f.origem].campanha), base)
+  });
+
+  const st = s => s === 'ACTIVE' ? '<span class="tag-pct verde">Ativa</span>'
+    : s === 'PAUSED' || s === 'CAMPAIGN_PAUSED' ? '<span class="tag-pct amarelo">Pausada</span>'
+    : s === 'HISTÓRICO' ? '<span class="tag-pct neutro">Histórico</span>'
+    : '<span class="tag-pct neutro">' + esc(s || '—') + '</span>';
+  const roiTag = v => v === null ? '—' : '<span class="tag-pct ' + (v >= 3 ? 'verde' : v >= 1 ? 'amarelo' : 'vermelho') + '">' + multTxt(v) + '</span>';
+  document.getElementById('corpoCampanhas').innerHTML = linhas.map((l, i) =>
+    '<tr data-i="' + i + '"><td><b>' + esc(l.campanha.nome) + '</b><br><span style="color:var(--texto-muted);font-size:.72rem">' +
+      esc(l.campanha.objetivo || '') + (l.campanha.origemOrc === 'conjuntos' ? ' · orçamento por conjunto' : '') + '</span></td>' +
+    '<td>' + st(l.campanha.status) + '</td>' +
+    '<td>' + (l.orcDiario ? moeda(l.orcDiario) : '—') + '</td>' +
+    '<td>' + (l.orcMensal ? moeda(l.orcMensal) : '—') + '</td>' +
+    '<td><b>' + moeda(l.gasto) + '</b></td>' +
+    '<td>' + num(l.leads) + '</td>' +
+    '<td>' + (l.cpl === null ? '—' : moeda(l.cpl)) + '</td>' +
+    '<td>' + num(l.clientes) + '</td>' +
+    '<td>' + (l.retorno ? '<b>' + moeda(l.retorno) + '</b>' : '—') + '</td>' +
+    '<td>' + pctTxt(l.conversao === null ? null : l.conversao * 100) + '</td>' +
+    '<td>' + (l.cac === null ? '—' : moeda(l.cac)) + '</td>' +
+    '<td>' + roiTag(l.roi) + '</td></tr>'
+  ).join('') || '<tr><td colspan="12">Nenhuma campanha com dados no período.</td></tr>';
+  document.getElementById('rodapeCampanhas').innerHTML = linhas.length ?
+    '<tr><td><b>Total</b></td><td></td><td>' + moeda(tot.orcDiario) + '</td><td>' + moeda(tot.orcMensal) + '</td>' +
+    '<td><b>' + moeda(tot.gasto) + '</b></td><td><b>' + num(tot.leads) + '</b></td>' +
+    '<td>' + (tot.cpl === null ? '—' : moeda(tot.cpl)) + '</td><td><b>' + num(tot.clientes) + '</b></td>' +
+    '<td><b>' + moeda(tot.retorno) + '</b></td><td>' + pctTxt(tot.conversao === null ? null : tot.conversao * 100) + '</td>' +
+    '<td>' + (tot.cac === null ? '—' : moeda(tot.cac)) + '</td><td>' + roiTag(tot.roi) + '</td></tr>' : '';
+  tabelaClicavel('corpoCampanhas', linhas, l => fichaCampanha(l, base, a));
+
+  /* gráficos */
+  destruir('gastoRetorno');
+  const top = linhas.slice(0, 8);
+  graficos.gastoRetorno = new Chart(document.getElementById('grafGastoRetorno'), {
+    type: 'bar',
+    data: { labels: top.map(l => l.campanha.nome.length > 28 ? l.campanha.nome.slice(0, 26) + '…' : l.campanha.nome),
+      datasets: [{ label: 'Gasto', data: top.map(l => l.gasto), backgroundColor: COR_VERMELHO, borderRadius: 4 },
+                 { label: 'Retorno', data: top.map(l => l.retorno), backgroundColor: COR_VERDE, borderRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { x: { grid: { display: false } }, y: { ticks: { callback: v => moedaCurta(v) }, grid: { color: COR_BORDA } } },
+      plugins: { tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + moeda(ctx.parsed.y) } } } }
+  });
+  destruir('diario');
+  graficos.diario = new Chart(document.getElementById('grafDiario'), {
+    type: 'bar',
+    data: { labels: a.serie.map(s => s.dia.getDate() + '/' + (s.dia.getMonth() + 1)),
+      datasets: [{ type: 'bar', label: 'Gasto', data: a.serie.map(s => s.gasto), backgroundColor: hexA(COR_AZUL, .55), borderRadius: 3, yAxisID: 'y' },
+                 { type: 'line', label: 'Leads', data: a.serie.map(s => s.leads), borderColor: COR_AMARELO, backgroundColor: COR_AMARELO, tension: .3, yAxisID: 'y1' }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      scales: { x: { grid: { display: false } },
+                y: { position: 'left', ticks: { callback: v => moedaCurta(v) }, grid: { color: COR_BORDA } },
+                y1: { position: 'right', ticks: { precision: 0 }, grid: { display: false } } } }
+  });
+
+  renderMapeamento(base, a);
+  renderObsResultados(base, a);
+}
+
+function renderMapeamento(base, a) {
+  const linhas = Object.values(base.mapa).map(m => {
+    const fs = a.fechamentos.filter(f => f.origem === m.origem);
+    return { ...m, qtd: fs.length, retorno: fs.reduce((s, f) => s + f.honorarios, 0) };
+  }).sort((x, y) => (y.campanha ? 1 : 0) - (x.campanha ? 1 : 0) || y.qtd - x.qtd);
+  const casadas = linhas.filter(l => l.campanha).length;
+  document.getElementById('subMapeamento').innerHTML =
+    '<b>' + num(casadas) + '</b> origem(ns) do Fluxo casam com campanha · <b>' + num(linhas.length - casadas) +
+    '</b> não são campanha (orgânico, indicação, recompra…) e ficam fora dos números acima.';
+  document.getElementById('corpoMapeamento').innerHTML = linhas.map(l =>
+    '<tr><td><b>' + esc(l.origem) + '</b></td>' +
+    '<td>' + (l.campanha ? esc(l.campanha.nome) : '<span style="color:var(--texto-muted)">— fora de campanha</span>') + '</td>' +
+    '<td><span class="tag-pct ' + (l.como === 'nome idêntico' || l.como === 'aba Mapeamento' ? 'verde' : l.campanha ? 'amarelo' : 'neutro') + '">' + esc(l.como) + '</span></td>' +
+    '<td>' + num(l.qtd) + '</td><td>' + (l.retorno ? moeda(l.retorno) : '—') + '</td></tr>'
+  ).join('') || '<tr><td colspan="5">Sem origens no Fluxo de Clientes.</td></tr>';
+}
+
+function listaFechamentos(titulo, fs, base) {
+  abrirLista({
+    titulo, sub: fs.length + ' fechamento(s) · ' + moeda(fs.reduce((s, f) => s + f.honorarios, 0)),
+    colunas: [
+      { r: 'Cliente', chave: 'cliente', formata: (v, l) => '<b>' + esc(v || '—') + '</b><br><span style="color:var(--texto-muted);font-size:.72rem">' + esc(l.produto) + '</span>' },
+      { r: 'Origem', chave: 'origem' },
+      { r: 'Campanha', chave: 'origem', formata: v => base.mapa[v] && base.mapa[v].campanha ? esc(base.mapa[v].campanha.nome) : '—' },
+      { r: 'Fechamento', chave: 'fechamento', formata: v => fmtData(v) },
+      { r: 'Honorários', chave: 'honorarios', alinha: 'dir', formata: v => '<b>' + moeda(v) + '</b>' },
+      { r: 'Entrada', chave: 'entrada', alinha: 'dir', formata: v => moeda(v) }
+    ],
+    linhas: [...fs].sort((x, y) => y.fechamento - x.fechamento)
+  });
+}
+
+function fichaCampanha(l, base, a) {
+  const dias = base.insights.filter(r => r.id === l.campanha.id && noPeriodo(r.data, a.per)).sort((x, y) => y.data - x.data);
+  abrirLista({
+    titulo: l.campanha.nome,
+    sub: 'Dia a dia no período · ' + moeda(l.gasto) + ' · ' + num(l.leads) + ' leads · ' + num(l.clientes) + ' cliente(s)',
+    colunas: [
+      { r: 'Dia', chave: 'data', formata: v => fmtData(v) },
+      { r: 'Gasto', chave: 'gasto', alinha: 'dir', formata: v => moeda(v) },
+      { r: 'Impressões', chave: 'impressoes', alinha: 'dir', formata: v => num(v) },
+      { r: 'Cliques link', chave: 'cliquesLink', alinha: 'dir', formata: v => num(v) },
+      { r: 'Leads', chave: 'leads', alinha: 'dir', formata: (v, r) => '<b>' + num(v) + '</b>' + (r.leadsForm || r.conversas ? '<br><span style="color:var(--texto-muted);font-size:.72rem">' + num(r.leadsForm) + ' form · ' + num(r.conversas) + ' conv.</span>' : '') },
+      { r: 'CPL do dia', chave: 'gasto', alinha: 'dir', formata: (v, r) => r.leads ? moeda(v / r.leads) : '—' }
+    ],
+    linhas: dias,
+    rodape: l.fechamentos.length
+      ? '<b>' + l.fechamentos.length + '</b> fechamento(s) no período, <b>' + moeda(l.retorno) + '</b> de honorários: ' +
+        esc(l.fechamentos.map(f => f.cliente).slice(0, 6).join(', ')) + (l.fechamentos.length > 6 ? '…' : '')
+      : 'Nenhum fechamento ligado a esta campanha no período.',
+    notas: [{ tipo: '', html: 'Orçamento diário <b>' + moeda(l.orcDiario) + '</b> (' + esc(l.campanha.origemOrc || '—') +
+      ') · objetivo ' + esc(l.campanha.objetivo || '—') + ' · status ' + esc(l.campanha.status || '—') }]
+  });
+}
+
+function renderObsResultados(base, a) {
+  const obs = [];
+  const { tot, linhas } = a;
+  if (!base.insights.length) {
+    obs.push(obsCard('critico', '&#9888;', 'Ainda não há dados do Meta',
+      'A planilha <i>Campanhas Meta Ads</i> não tem linhas em <b>Insights diários</b>. Rode <b>BM · Meta Ads → Sincronizar completa</b> no Apps Script.'));
+  }
+  if (a.ultimaData) {
+    const atraso = Math.round((hojeZerado() - a.ultimaData) / 86400000);
+    if (atraso > 2) obs.push(obsCard('atencao', '&#128337;', 'Dados do Meta com ' + atraso + ' dias de atraso',
+      'O último dia com dados é <b>' + fmtData(a.ultimaData) + '</b>. O gatilho de hora em hora deveria manter isso em 0–1 dia — confira a aba <b>_Sync</b> e o token.'));
+  }
+  const semRetorno = linhas.filter(l => l.gasto > 0 && l.clientes === 0);
+  if (semRetorno.length) obs.push(obsCard('atencao', '&#128176;', 'Campanhas com gasto e nenhum fechamento no período',
+    semRetorno.map(l => '<b>' + esc(l.campanha.nome) + '</b> (' + moeda(l.gasto) + ', ' + num(l.leads) + ' leads)').join(' · ') +
+    '. Pode ser ciclo de venda maior que o período — confira em <b>últimos 3 meses</b> antes de concluir.'));
+  const roiRuim = linhas.filter(l => l.roi !== null && l.roi < 1 && l.gasto > 500);
+  if (roiRuim.length) obs.push(obsCard('critico', '&#128201;', 'Retorno abaixo do investido',
+    roiRuim.map(l => '<b>' + esc(l.campanha.nome) + '</b>: ' + multTxt(l.roi) + ' por R$ 1').join(' · ') +
+    '. Com honorários iniciais como retorno, abaixo de R$ 1 a campanha não se paga no período.'));
+  const naoCasadas = Object.values(base.mapa).filter(m => !m.campanha && /\[|rev\.|revisional|ads/i.test(m.origem));
+  if (naoCasadas.length) obs.push(obsCard('atencao', '&#128279;', 'Origens com cara de campanha sem casamento',
+    naoCasadas.map(m => '<b>' + esc(m.origem) + '</b>').join(' · ') +
+    ' — os fechamentos dessas origens não entram em nenhuma campanha. Preencha a aba <b>Mapeamento</b> na planilha.'));
+  if (tot.roi !== null && tot.roi >= 3) obs.push(obsCard('bom', '&#10004;', 'Retorno consistente no período',
+    'Cada R$ 1 investido voltou como <b>' + multTxt(tot.roi) + '</b> em honorários iniciais, com CAC de <b>' + moeda(tot.cac) + '</b>.'));
+  document.getElementById('obsResultados').innerHTML = obs.join('') || '<div class="obs-vazio">Nenhum ponto de atenção no período.</div>';
+}
+
+/* ---------- página 2 — gestor de tráfego ---------- */
+const NOME_JANELA = { '7d': 'últimos 7 dias', '30d': 'últimos 30 dias', 'mes': 'mês atual' };
+
+function renderGestor(base) {
+  const jan = FILTRO.janela;
+  const J = base.janelas.filter(j => j.janela === jan && daConta(j));
+  const J7 = base.janelas.filter(j => j.janela === '7d' && daConta(j));
+  const J30 = base.janelas.filter(j => j.janela === '30d' && daConta(j));
+  const por = arr => Object.fromEntries(arr.map(j => [j.id, j]));
+  const m7 = por(J7), m30 = por(J30);
+  const diasJanela = jan === '7d' ? 7 : jan === '30d' ? 30 : hojeZerado().getDate();
+
+  const tot = J.reduce((t, j) => { t.gasto += j.gasto; t.imp += j.impressoes; t.cl += j.cliquesLink; t.lpv += j.lpv; t.leads += j.leads; return t; },
+    { gasto: 0, imp: 0, cl: 0, lpv: 0, leads: 0 });
+  const orcJanela = J.reduce((s, j) => s + ((base.campanhas[j.id] || {}).orcDiario || 0), 0) * diasJanela;
+  const ctrLink = divisao(tot.cl, tot.imp), cpm = divisao(tot.gasto, tot.imp / 1000), cpl = divisao(tot.gasto, tot.leads);
+  const lpvRate = divisao(tot.lpv, tot.cl), entrega = divisao(tot.gasto, orcJanela);
+  const semaforo = (v, bom, ruim, inverso) => v === null ? 'azul' : inverso ? (v <= bom ? 'verde' : v >= ruim ? 'vermelho' : 'amarelo') : (v >= bom ? 'verde' : v <= ruim ? 'vermelho' : 'amarelo');
+
+  document.getElementById('kpisGestor').innerHTML = [
+    cartaoKPI('Gasto na janela', moeda(tot.gasto), 'azul', '<span>' + esc(NOME_JANELA[jan]) + ' · ' + num(J.length) + ' campanha(s)</span>'),
+    cartaoKPI('Entrega do orçamento', pctTxt(entrega === null ? null : entrega * 100), semaforo(entrega, 0.8, 0.5),
+      '<span>gasto ÷ (orçamento diário × ' + diasJanela + ' dias)</span>'),
+    cartaoKPI('CPM', cpm === null ? '—' : moeda(cpm), semaforo(cpm, 25, 60, true), '<span>custo por mil impressões</span>'),
+    cartaoKPI('CTR do link', pctTxt(ctrLink === null ? null : ctrLink * 100), semaforo(ctrLink, 0.01, 0.007),
+      '<span>cliques no link ÷ impressões</span>'),
+    cartaoKPI('Página vista ÷ clique', pctTxt(lpvRate === null ? null : lpvRate * 100), semaforo(lpvRate, 0.7, 0.5),
+      '<span>quem clicou e de fato carregou a página</span>'),
+    cartaoKPI('Custo por lead', cpl === null ? '—' : moeda(cpl), semaforo(cpl, 50, 120, true),
+      '<span>' + num(tot.leads) + ' leads na janela</span>')
+  ].join('');
+
+  /* tabela de mídia */
+  const linhas = J.map(j => {
+    const c = base.campanhas[j.id] || {};
+    const orc = (c.orcDiario || 0) * diasJanela;
+    return Object.assign({}, j, {
+      entrega: divisao(j.gasto, orc), lpvRate: divisao(j.lpv, j.cliquesLink),
+      cpl7: (m7[j.id] || {}).cpl || null, cpl30: (m30[j.id] || {}).cpl || null,
+      cpm7: (m7[j.id] || {}).cpm || null, cpm30: (m30[j.id] || {}).cpm || null
+    });
+  }).sort((x, y) => y.gasto - x.gasto);
+  const tag = (txt, cor) => '<span class="tag-pct ' + cor + '">' + txt + '</span>';
+  const corCtr = v => v >= 1 ? 'verde' : v < 0.7 ? 'vermelho' : 'amarelo';
+  const corFreq = v => v <= 2 ? 'verde' : v > 3 ? 'vermelho' : 'amarelo';
+  const corLpv = v => v === null ? 'neutro' : v >= 0.7 ? 'verde' : v < 0.5 ? 'vermelho' : 'amarelo';
+  const corEntrega = v => v === null ? 'neutro' : v >= 0.8 ? 'verde' : v < 0.5 ? 'vermelho' : 'amarelo';
+  const tend = (a7, a30) => a7 === null || a30 === null || !a30 ? '—'
+    : (a7 / a30 - 1) > 0.25 ? tag('↑ ' + Math.round((a7 / a30 - 1) * 100) + '% pior', 'vermelho')
+    : (a7 / a30 - 1) < -0.15 ? tag('↓ ' + Math.round((1 - a7 / a30) * 100) + '% melhor', 'verde')
+    : tag('estável', 'neutro');
+  document.getElementById('corpoMidia').innerHTML = linhas.map(l =>
+    '<tr><td><b>' + esc(l.nome) + '</b></td><td><b>' + moeda(l.gasto) + '</b></td>' +
+    '<td>' + (l.entrega === null ? '—' : tag(pctTxt(l.entrega * 100), corEntrega(l.entrega))) + '</td>' +
+    '<td>' + num(l.impressoes) + '</td><td>' + num(l.alcance) + '</td>' +
+    '<td>' + tag(l.freq.toFixed(2).replace('.', ','), corFreq(l.freq)) + '</td>' +
+    '<td>' + moeda(l.cpm) + '</td>' +
+    '<td>' + tag(pctTxt(l.ctrLink), corCtr(l.ctrLink)) + '</td>' +
+    '<td>' + moeda(l.cpc) + '</td><td>' + num(l.cliquesLink) + '</td>' +
+    '<td>' + (l.lpvRate === null ? '—' : tag(pctTxt(l.lpvRate * 100), corLpv(l.lpvRate))) + '</td>' +
+    '<td><b>' + num(l.leads) + '</b></td><td>' + (l.leads ? moeda(l.gasto / l.leads) : '—') + '</td>' +
+    '<td>' + tend(l.cpl7, l.cpl30) + '</td></tr>'
+  ).join('') || '<tr><td colspan="14">Sem dados de janela ainda — a aba <b>Janelas</b> é preenchida a cada sincronização.</td></tr>';
+
+  renderAnuncios(base);
+  renderIndicacoes(base, linhas, J7, J30);
+
+  /* gráficos 7 × 30 */
+  const nomes = J30.map(j => j.nome.length > 24 ? j.nome.slice(0, 22) + '…' : j.nome);
+  const par = (id, chave, rotulo, fmt) => {
+    destruir(id);
+    graficos[id] = new Chart(document.getElementById(id === 'ctr' ? 'grafCtr' : 'grafCpl'), {
+      type: 'bar',
+      data: { labels: nomes, datasets: [
+        { label: '30 dias', data: J30.map(j => j[chave]), backgroundColor: hexA(COR_AZUL, .5), borderRadius: 4 },
+        { label: '7 dias', data: J30.map(j => (m7[j.id] || {})[chave] || 0), backgroundColor: COR_AMARELO, borderRadius: 4 }] },
+      options: { responsive: true, maintainAspectRatio: false,
+        scales: { x: { grid: { display: false } }, y: { ticks: { callback: fmt }, grid: { color: COR_BORDA } } },
+        plugins: { tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + fmt(ctx.parsed.y) } } } }
+    });
+  };
+  par('ctr', 'ctrLink', 'CTR do link', v => pctTxt(v));
+  par('cpl', 'cpl', 'CPL', v => moeda(v));
+}
+
+function renderAnuncios(base) {
+  const jan = FILTRO.janela === 'mes' ? '30d' : FILTRO.janela;   // anúncio só tem 7 e 30 dias
+  let A = base.anuncios.filter(x => x.janela === jan && daConta(x));
+  const gastoCamp = {};
+  A.forEach(x => { gastoCamp[x.id] = (gastoCamp[x.id] || 0) + x.gasto; });
+  const mediaCamp = {};
+  A.forEach(x => { (mediaCamp[x.id] = mediaCamp[x.id] || { imp: 0, cl: 0, gasto: 0, leads: 0 });
+    mediaCamp[x.id].imp += x.impressoes; mediaCamp[x.id].cl += x.cliquesLink; mediaCamp[x.id].gasto += x.gasto; mediaCamp[x.id].leads += x.leads; });
+  if (FILTRO.busca) A = A.filter(x => casaBusca(FILTRO.busca, x.anuncio, x.conjunto, x.nome));
+  A.sort((x, y) => y.gasto - x.gasto);
+
+  const diag = x => {
+    const m = mediaCamp[x.id] || { imp: 0, cl: 0, gasto: 0, leads: 0 };
+    const ctrMed = divisao(m.cl, m.imp), cplMed = divisao(m.gasto, m.leads);
+    const parte = divisao(x.gasto, gastoCamp[x.id]) || 0;
+    const ctr = x.impressoes ? x.cliquesLink / x.impressoes : 0;
+    const out = [];
+    if (x.gasto >= 100 && x.leads === 0) out.push(['sem lead com gasto', 'vermelho']);
+    else if (x.leads && cplMed && x.cpl > cplMed * 1.4) out.push(['CPL 40%+ acima da campanha', 'vermelho']);
+    else if (x.leads && cplMed && x.cpl < cplMed * 0.7) out.push(['melhor CPL da campanha', 'verde']);
+    if (x.freq > 3) out.push(['fadiga: freq. ' + x.freq.toFixed(1), 'vermelho']);
+    if (ctrMed && ctr < ctrMed * 0.6) out.push(['CTR fraco', 'amarelo']);
+    else if (ctrMed && ctr > ctrMed * 1.4) out.push(['CTR forte', 'verde']);
+    if (parte > 0.6 && Object.keys(mediaCamp).length && A.filter(y => y.id === x.id).length > 1) out.push(['concentra ' + Math.round(parte * 100) + '% do gasto', 'amarelo']);
+    return out.length ? out.map(([t, c]) => '<span class="tag-pct ' + c + '">' + esc(t) + '</span>').join(' ') : '<span class="tag-pct neutro">na média</span>';
+  };
+  const vis = A.slice(0, 200);
+  document.getElementById('corpoAnuncios').innerHTML = vis.map(x =>
+    '<tr><td><b>' + esc(x.anuncio) + '</b></td>' +
+    '<td><span style="font-size:.78rem">' + esc(x.nome) + '</span><br><span style="color:var(--texto-muted);font-size:.72rem">' + esc(x.conjunto) + '</span></td>' +
+    '<td><b>' + moeda(x.gasto) + '</b></td><td>' + pctTxt((divisao(x.gasto, gastoCamp[x.id]) || 0) * 100) + '</td>' +
+    '<td>' + num(x.impressoes) + '</td><td>' + x.freq.toFixed(2).replace('.', ',') + '</td>' +
+    '<td>' + pctTxt(x.ctrLink) + '</td><td>' + moeda(x.cpm) + '</td>' +
+    '<td><b>' + num(x.leads) + '</b></td><td>' + (x.leads ? moeda(x.gasto / x.leads) : '—') + '</td>' +
+    '<td style="white-space:normal;min-width:180px">' + diag(x) + '</td></tr>'
+  ).join('') || '<tr><td colspan="11">Sem anúncios na janela' + (FILTRO.busca ? ' para esta busca' : '') + '.</td></tr>';
+  document.getElementById('notaAnuncios').textContent = 'Janela: ' + NOME_JANELA[jan] + ' · ' + vis.length + ' de ' + A.length + ' anúncios.';
+}
+
+/* Regras de gestor de tráfego, cada uma com o que olhar e o que fazer. */
+function renderIndicacoes(base, linhas, J7, J30) {
+  const obs = [];
+  const m7 = Object.fromEntries(J7.map(j => [j.id, j])), m30 = Object.fromEntries(J30.map(j => [j.id, j]));
+  const nome = l => '<b>' + esc(l.nome) + '</b>';
+
+  linhas.forEach(l => {
+    const c = base.campanhas[l.id] || {};
+    const j7 = m7[l.id], j30 = m30[l.id];
+    if (l.freq > 3 && l.impressoes > 5000)
+      obs.push(obsCard('critico', '&#128260;', 'Fadiga de criativo — ' + esc(l.nome),
+        'Frequência de <b>' + l.freq.toFixed(1) + '</b> na janela: a mesma pessoa viu o anúncio mais de 3 vezes. A partir daí o CTR cai e o CPM sobe. ' +
+        '<b>Fazer:</b> trocar ou adicionar criativos, ampliar o público (interesses/lookalike) ou excluir quem já converteu.'));
+    if (l.ctrLink < 0.7 && l.impressoes > 5000)
+      obs.push(obsCard('atencao', '&#128065;', 'CTR do link baixo — ' + esc(l.nome),
+        '<b>' + pctTxt(l.ctrLink) + '</b> de cliques no link por impressão (referência: acima de 1%). O anúncio não está parando o dedo. ' +
+        '<b>Fazer:</b> testar gancho nos 3 primeiros segundos, primeira linha da copy e chamada para ação; comparar os anúncios da campanha na tabela abaixo.'));
+    if (j7 && j30 && j30.cpm && j7.cpm / j30.cpm > 1.25 && j7.impressoes > 2000)
+      obs.push(obsCard('atencao', '&#128200;', 'CPM subindo — ' + esc(l.nome),
+        'CPM de <b>' + moeda(j7.cpm) + '</b> nos últimos 7 dias contra <b>' + moeda(j30.cpm) + '</b> nos 30 — leilão mais caro ou público saturando. ' +
+        '<b>Fazer:</b> revisar segmentação e posicionamentos; se a frequência também subiu, é saturação.'));
+    if (j7 && j30 && j30.cpl && j7.cpl && j7.cpl / j30.cpl > 1.3 && j7.leads >= 3)
+      obs.push(obsCard('critico', '&#9888;', 'Custo por lead piorou — ' + esc(l.nome),
+        'CPL de <b>' + moeda(j7.cpl) + '</b> nos últimos 7 dias, <b>' + Math.round((j7.cpl / j30.cpl - 1) * 100) + '% acima</b> dos 30 dias (' + moeda(j30.cpl) + '). ' +
+        '<b>Fazer:</b> ver se é criativo (CTR caiu), leilão (CPM subiu) ou página (visualização ÷ clique caiu) — os três estão na tabela.'));
+    if (l.lpvRate !== null && l.lpvRate < 0.5 && l.cliquesLink > 100)
+      obs.push(obsCard('atencao', '&#127760;', 'Cliques que não viram página vista — ' + esc(l.nome),
+        'Só <b>' + pctTxt(l.lpvRate * 100) + '</b> dos cliques no link carregaram a página. Página lenta no celular ou clique acidental. ' +
+        '<b>Fazer:</b> medir a velocidade da página de destino; se for WhatsApp, conferir o link.'));
+    if (l.entrega !== null && l.entrega < 0.5 && c.status === 'ACTIVE' && c.orcDiario > 0)
+      obs.push(obsCard('atencao', '&#9203;', 'Entrega abaixo do orçamento — ' + esc(l.nome),
+        'Gastou <b>' + pctTxt(l.entrega * 100) + '</b> do orçamento disponível na janela. O Meta não está conseguindo entregar. ' +
+        '<b>Fazer:</b> público estreito demais, lance limitado ou anúncios reprovados/em análise — conferir no Gerenciador.'));
+    if (l.gasto > 300 && l.leads === 0)
+      obs.push(obsCard('critico', '&#128683;', 'Gasto sem nenhum lead — ' + esc(l.nome),
+        '<b>' + moeda(l.gasto) + '</b> na janela e zero leads. ' +
+        '<b>Fazer:</b> pausar e revisar objetivo da campanha, evento de conversão e destino antes de reativar.'));
+  });
+
+  /* dependência de um único anúncio, por campanha (janela 30d) */
+  const porCamp = {};
+  base.anuncios.filter(x => x.janela === '30d' && daConta(x)).forEach(x => { (porCamp[x.id] = porCamp[x.id] || []).push(x); });
+  Object.values(porCamp).forEach(lista => {
+    if (lista.length < 2) return;
+    const total = lista.reduce((s, x) => s + x.gasto, 0);
+    const top = [...lista].sort((a, b) => b.gasto - a.gasto)[0];
+    if (total && top.gasto / total >= 0.7)
+      obs.push(obsCard('info', '&#127919;', 'Um anúncio carrega a campanha — ' + esc(top.nome),
+        '<b>' + esc(top.anuncio) + '</b> concentra <b>' + Math.round(top.gasto / total * 100) + '%</b> do gasto de 30 dias entre ' + lista.length + ' anúncios. ' +
+        'Funciona até cansar. <b>Fazer:</b> preparar 2–3 variações desse criativo antes que a frequência passe de 3.'));
+  });
+
+  if (!linhas.length) obs.push(obsCard('info', '&#8505;', 'Sem janelas ainda',
+    'A aba <b>Janelas</b> é preenchida a cada sincronização do Apps Script. Rode <b>Sincronizar incremental</b> ou aguarde o gatilho.'));
+  document.getElementById('obsGestor').innerHTML = obs.length ? obs.join('') : '<div class="obs-vazio">Nenhuma indicação: entrega, CTR, frequência e CPL dentro das referências na janela.</div>';
+}
+
+
+/* =========================================================================
+   CICLO / AUTENTICAÇÃO
+   ========================================================================= */
+let DADOS = null;
+
+/* Cada carga leva um número; ao voltar, só desenha se ainda for a mais
+   recente. Sem isso, uma carga antiga que termina depois reescreve a tela com
+   o recorte que o usuário já trocou — e quanto mais demorada a busca, mais
+   provável isso é. */
+let GERACAO_CARGA = 0;
+let ULTIMA_CONCLUIDA = 0;
+
+async function carregarDados() {
+  const erroEl = document.getElementById('erroBox');
+  const minhaGeracao = ++GERACAO_CARGA;
+  try {
+    const dados = await buscarTudo();
+    if (minhaGeracao !== GERACAO_CARGA) return;   // outra carga começou depois
+    DADOS = dados;
+    const idLink = CONFIG.SHEET_ID ||
+      (CONFIG.SHEETS ? Object.values(CONFIG.SHEETS)[0] : null);
+    const linkEl = document.getElementById('linkPlanilha');
+    if (idLink) linkEl.href = 'https://docs.google.com/spreadsheets/d/' + idLink + '/edit';
+    else linkEl.style.display = 'none';
+    document.getElementById('carregando').classList.add('oculto');
+    document.getElementById('conteudo').classList.remove('oculto');
+    erroEl.classList.add('oculto');
+    document.getElementById('atualizadoEm').textContent =
+      'Atualizado às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    render(DADOS);
+    ULTIMA_CONCLUIDA = minhaGeracao;
+  } catch (e) {
+    if (minhaGeracao !== GERACAO_CARGA) return;   // falha de carga já superada
+    console.error(e);
+    document.getElementById('carregando').classList.add('oculto');
+    erroEl.classList.remove('oculto');
+    erroEl.innerHTML = '<b>Não foi possível carregar a planilha.</b><br>' + e.message +
+      '<br>Verifique se a planilha continua compartilhada como <b>"qualquer pessoa com o link pode ver"</b>.' +
+      ' Nova tentativa automática em ' + CONFIG.AUTO_REFRESH_MIN + ' min.';
+  }
+}
+
+document.getElementById('btnAtualizar').addEventListener('click', carregarDados);
+/* Voltar para a aba não pode empilhar carga sobre carga em andamento: numa
+   busca longa isso multiplicava chamadas à fonte sem trazer nada de novo. */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !DADOS) return;
+  if (GERACAO_CARGA !== ULTIMA_CONCLUIDA) return;   // ainda carregando
+  carregarDados();
+});
+setInterval(() => { if (DADOS) carregarDados(); }, CONFIG.AUTO_REFRESH_MIN * 60 * 1000);
+
+const CHAVE_SESSAO = 'dashboard-meta-ads_sessao';
+
+function entrarNoPainel(segredo, guardar) {
+  // Copia tudo o que o cofre trouxer: um painel pode guardar uma planilha
+  // (SHEET_ID) ou várias (SHEETS), além da chave da API.
+  Object.assign(CONFIG, segredo);
+  if (guardar) { try { sessionStorage.setItem(CHAVE_SESSAO, JSON.stringify(segredo)); } catch (e) {} }
+  document.getElementById('loginOverlay').classList.add('oculto');
+  document.getElementById('cabecalho').classList.remove('oculto');
+  document.getElementById('carregando').classList.remove('oculto');
+  carregarDados();
+}
+
+document.getElementById('loginForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const btn = document.getElementById('btnEntrar');
+  const erroEl = document.getElementById('loginErro');
+  erroEl.classList.add('oculto');
+  btn.disabled = true; btn.textContent = 'Verificando…';
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    const segredo = await abrirCofre(
+      document.getElementById('campoUsuario').value,
+      document.getElementById('campoSenha').value);
+    btn.textContent = 'Entrando…';
+    entrarNoPainel(segredo, true);
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Entrar';
+    erroEl.classList.remove('oculto');
+    erroEl.textContent = 'Login ou senha sem acesso a este painel.';
+    document.getElementById('campoSenha').value = '';
+    document.getElementById('campoSenha').focus();
+  }
+});
+
+document.getElementById('btnSair').addEventListener('click', () => {
+  try { sessionStorage.removeItem(CHAVE_SESSAO); } catch (e) {}
+  location.reload();
+});
+
+(async function iniciar() {
+  let salvo = null;
+  try { salvo = sessionStorage.getItem(CHAVE_SESSAO); } catch (e) {}
+  if (salvo) { try { entrarNoPainel(JSON.parse(salvo), false); return; } catch (e) {} }
+  let cred = null;
+  try { cred = JSON.parse(sessionStorage.getItem('bm_portal_cred') || 'null'); } catch (e) {}
+  if (cred && cred.u != null && cred.s != null) {
+    try { entrarNoPainel(await abrirCofre(cred.u, cred.s), true); return; } catch (e) {}
+  }
+  document.getElementById('campoUsuario').focus();
+})();
+</script>
+</body>
+</html>
