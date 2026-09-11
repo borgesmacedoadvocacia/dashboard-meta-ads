@@ -125,11 +125,9 @@ function configurarTudo() {
   criarGatilhoHorario();
   gravarSync_({ status: 'ocioso', etapa: 'configurado',
                 mensagem: 'Abas criadas. Coloque META_ACCESS_TOKEN nas Propriedades do script e rode a sincronização completa.' });
-  try {
-    SpreadsheetApp.getUi().alert('Pronto. Abas criadas e gatilho de hora em hora ativo.\n\n' +
-      'Agora: Configurações do projeto → Propriedades do script → META_ACCESS_TOKEN.\n' +
-      'Depois, menu BM · Meta Ads → Testar conexão → Sincronizar completa.');
-  } catch (e) {}
+  alertar_('Pronto. Abas criadas e gatilho de hora em hora ativo.\n\n' +
+    'Agora: Configurações do projeto → Propriedades do script → META_ACCESS_TOKEN.\n' +
+    'Depois: testarConexao → sincronizarCompleta (pelo editor ou pelo menu da planilha).');
 }
 
 function criarGatilhoHorario() {
@@ -158,7 +156,7 @@ function testarConexao() {
   });
   var texto = linhas.join('\n');
   gravarSync_({ etapa: 'teste', mensagem: texto.slice(0, 400) });
-  try { SpreadsheetApp.getUi().alert(texto); } catch (e) { Logger.log(texto); }
+  alertar_(texto);
   return texto;
 }
 
@@ -493,7 +491,30 @@ function doGet(e) {
 
 /* ============================================================ UTILITÁRIOS */
 
-function planilha_() { return SpreadsheetApp.getActiveSpreadsheet(); }
+/* Com o script criado fora da planilha nao ha interface: o aviso vai para o
+   Registro de execucao. */
+function alertar_(texto) {
+  try { SpreadsheetApp.getUi().alert(texto); } catch (e) { Logger.log(texto); }
+}
+
+/* ID da planilha "Campanhas Meta Ads". Nao e segredo (a planilha e compartilhada
+   por link); fica aqui para o script funcionar tambem quando criado FORA da
+   planilha, no script.google.com — caso em que getActiveSpreadsheet() e nulo
+   e o menu da planilha nao existe (as funcoes rodam pelo editor). */
+var PLANILHA_ID = '1vwULTReUh2vUoVE4W9TuAKo1inOLg7ju0oIv_tntPvg';
+
+var PLANILHA_CACHE_ = null;
+function planilha_() {
+  if (PLANILHA_CACHE_) return PLANILHA_CACHE_;
+  var ss = null;
+  try { ss = SpreadsheetApp.getActiveSpreadsheet(); } catch (e) {}
+  if (!ss) {
+    var id = PropertiesService.getScriptProperties().getProperty('PLANILHA_ID') || PLANILHA_ID;
+    ss = SpreadsheetApp.openById(id);
+  }
+  PLANILHA_CACHE_ = ss;
+  return ss;
+}
 function props_() { return PropertiesService.getScriptProperties(); }
 
 function garantirAba_(ss, nome, cab) {
