@@ -2,8 +2,7 @@
 
 Painel de resultado das campanhas do Meta Ads do escritório Borges Macedo Advocacia,
 alimentado em tempo real pela planilha **"Campanhas Meta Ads"** (que o Apps Script
-preenche a partir da Marketing API do Meta) e pela planilha **"Fluxo de Clientes"**
-(aba DADOS), de onde vêm clientes e retorno financeiro.
+preenche a partir da Marketing API do Meta) e pelas planilhas **"Fluxo de Clientes"** de cada ano (2026 e 2025, aba DADOS), de onde vêm clientes e retorno financeiro.
 
 **Acesso exclusivo das lideranças.** Os perfis Administração e Lideranças têm cofre
 neste painel; a credencial do perfil Equipe não decifra nada.
@@ -35,7 +34,7 @@ do script → `META_ACCESS_TOKEN`*.
 ## O que é exibido
 
 **Resultados das campanhas** — por período (mês atual por padrão; últimos 30 dias, últimos
-3 meses, este ano, mês escolhido ou período livre): nome, orçamento diário e mensal, gasto,
+3 meses, este ano, todo o período, mês escolhido ou período livre): nome, orçamento diário e mensal, gasto,
 leads, custo por lead, clientes, retorno financeiro, conversão lead → cliente, CAC e ROI.
 Retorno = **honorários iniciais** dos fechamentos com **pagamento confirmado**, pela **data do
 fechamento**, cujo campo ORIGEM casa com a campanha. Fórmulas: CPL = gasto ÷ leads ·

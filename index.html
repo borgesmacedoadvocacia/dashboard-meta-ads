@@ -524,6 +524,7 @@
           <button type="button" class="chip" data-periodo="30d">Últimos 30 dias</button>
           <button type="button" class="chip" data-periodo="3m">Últimos 3 meses</button>
           <button type="button" class="chip" data-periodo="ano">Este ano</button>
+          <button type="button" class="chip" data-periodo="tudo">Todo o período</button>
           <div class="sep"></div>
           <label class="filtro-campo">Mês
             <select class="campo-texto" id="selMes"><option value="">—</option></select>
@@ -696,9 +697,9 @@
    ========================================================================= */
 const COFRES = [
 /* Administração */
-  {"v":1,"it":310000,"salt":"IfyZ9to5uYuGMZwr2alizA==","iv":"4zc3lCfcLXp+8LdQ","ct":"npsInYjUhPellj58dgkkcNn5Um8Go6ZVyz+5+FBooX/e/a9+y1q42aE6vtryn7+9k/99QbxAXdMbcW7HpIUozHMQJxfg7Rq7gR/j8ePTb/MnFg62p/gEwQMs4Hd0p2hs39fZTNJBjqLgyJCRaVgiiXenGIF/N+cLOXq6m0L8KpiV5iYIt6jNiKejHiVvPbpAJRWRbYcApZbWwuwnETyaR+YokLi5x8URfMYlhjZMruD2UwPRX7g4ZUATj8yvOiQsXJXbbpQ0"},
+  {"v":1,"it":310000,"salt":"3Ech4hpuB+gMN1B8JROVXQ==","iv":"BQRPYtmedqG/BxVB","ct":"t80uVGRckdjGXOX81IlfhrNTOF444vIcMiaWI1wT/eYY0nY0yqKmTip7pOBY2nhbcuRIdW3PCxjC1M+urS4bilC7wyl1wKoOrb19E1+HFUj3I3jr7xi5sMz3QenroFKNzzn/o4zLfMCnvn0OTNngYDrH8JN8NlQzSM9hR/nC2Emz8p3Kk2yzphFni0B4w8ntFSzX4O18KxH/6qEpT+YVMSlF4bzaLh6OKZwwJgncGUUAQztTJotFfevLXmBhIbqrXUGAJTrNnxdfSJuqDe+W2f2+/F/3yiOCSizw62UjV8/A0fWy1xkckh+YsgBOYJszOsaKTWh65fyWVJpkK3eVtCS8192q85n5pooILdpxKUXf2aj7BqdfPctnSPV9z0lGOTdJG9Qo2eikV1WtKpIaB6mFKEXfe6k5"},
   /* Lideranças */
-  {"v":1,"it":310000,"salt":"vHQoqH4nSN7eS1dxUULd7g==","iv":"StVOPIplqF1LEQyq","ct":"5GS03b7cHfRSZ14MCPXRelCYEWisaUXDD7r+nKgaNu1jbzjpEYVAiI4pthtMf8PHvVmFEZA+MpfiLO115TUoWoUxmjfHN7V0pDrUWbqSlJXAjfn09dIanmx+LfPdj61Ll9NtL7BZEmqF4ZMZBc7llzI8oMQYBmSLxjGq+llbNW7uMk/fcTHPgeQcgPtQVLQ7wXy/Af4QifztBaQ8tq6gSkhIpeB8myhuyeNawnc5nU3+QADw0GG18q9r0Yfa71FJc7a44cBa"}
+  {"v":1,"it":310000,"salt":"6znp0FZ2JXji6HsvsnoEuA==","iv":"Z8cQRnABEpYneHE1","ct":"MBpwJZqDtE6w6D3B7NxdEATMLZHyutuVYyzRgtoaH7etthB62zUNeIDn0P9X9mImtet36nHDywfqoV5BjkBEQAUFF0bi1BrNnVUaKE5WUG8RYvdUcLiQVBX252KuKDX3P7i0JizmCurUNGUHVVESItBRLDl7UTcdZd0B2apboYPGwa5Bocs/V2end5OB8f+UWq2gEpyZzwar3Q+uw/CKES4w93Tj239tMZhddyw/MA3F8vRGR+17huqq8vK/d4otW+gBavBu36HeNBrEgy5HKWivs4B4G96/ZfROPwE+ZCkw9iMZgdEFTQjSKbQQoc0yL4yw2WTr7vjWyE+bc2X4/Xzewo8Jc7STBTzNlj5/MeATqwz30z7Od6f3AqPTJznifVmoFKfR0jzdq7iZFJRuHyt0uM6yNHkC"}
 ];
 
 const b64bytes = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
@@ -1119,15 +1120,26 @@ async function lerAbasDe(sheetId, ranges) {
   return ((await resp.json()).valueRanges || []).map(vr => vr.values || []);
 }
 
+/* Uma planilha de Fluxo por ano (2026, 2025…). O cofre traz a lista em
+   FLUXO_SHEET_IDS; FLUXO_SHEET_ID sozinho continua aceito. */
+function planilhasFluxo() {
+  if (Array.isArray(CONFIG.FLUXO_SHEET_IDS) && CONFIG.FLUXO_SHEET_IDS.length) return CONFIG.FLUXO_SHEET_IDS;
+  return CONFIG.FLUXO_SHEET_ID ? [CONFIG.FLUXO_SHEET_ID] : [];
+}
+
 async function buscarTudo() {
-  const [meta, fluxo] = await Promise.all([
-    lerAbasDe(CONFIG.SHEET_ID, ABAS_META.map(aspas)),
-    CONFIG.FLUXO_SHEET_ID ? lerAbasDe(CONFIG.FLUXO_SHEET_ID, [aspas(ABA_FLUXO)]) : Promise.resolve([[]])
-  ]);
+  const ids = planilhasFluxo();
+  const [meta, ...fluxos] = await Promise.all([
+    lerAbasDe(CONFIG.SHEET_ID, ABAS_META.map(aspas))
+  ].concat(ids.map(id => lerAbasDe(id, [aspas(ABA_FLUXO)]).catch(e => {
+    console.warn('Fluxo ' + id + ' não respondeu: ' + e.message); return [[]];
+  }))));
   const t = i => tabela(meta[i] || []);
   return montarBase({
     insights: t(0), janelas: t(1), anuncios: t(2), campanhas: t(3), mapeamento: t(4),
-    sync: meta[5] || [], fluxo: tabela(fluxo[0] || [])
+    sync: meta[5] || [],
+    /* Cada planilha tem o próprio cabeçalho: resolve-se por nome em cada uma. */
+    fluxos: fluxos.map((f, i) => Object.assign(tabela(f[0] || []), { planilha: ids[i] }))
   });
 }
 
@@ -1159,7 +1171,7 @@ const divisao = (a, b) => b ? a / b : null;
 /* ------------------------------------------------------------- base */
 function montarBase(bruto) {
   const c = bruto.campanhas.cab, ci = bruto.insights.cab, cj = bruto.janelas.cab,
-        ca = bruto.anuncios.cab, cm = bruto.mapeamento.cab, cf = bruto.fluxo.cab;
+        ca = bruto.anuncios.cab, cm = bruto.mapeamento.cab;
 
   /* Campanhas: identidade, orçamento e status. */
   const campanhas = {};
@@ -1221,22 +1233,41 @@ function montarBase(bruto) {
     if (o && n) manual[o] = n;
   });
 
-  /* Fluxo de Clientes: só o que a regra pede — pagamento confirmado, pela
-     data do fechamento, honorários iniciais como retorno. */
-  const fluxo = bruto.fluxo.linhas.map(l => ({
-    contato: dataISO(campo(l, cf, '1º CONTATO', 'A')), origem: campo(l, cf, 'ORIGEM', 'B'),
-    fechamento: dataISO(campo(l, cf, 'DATA DO FECHAMENTO', 'F')), cliente: campo(l, cf, 'CLIENTE (O MESMO DO CONTRATO)', 'Q') || campo(l, cf, 'CONTATO (QUEM ESTÁ EM CONTATO)', 'G'),
-    produto: campo(l, cf, 'PRODUTO JURÍDICO', 'H'), honorarios: numCel(campo(l, cf, 'HONORÁRIOS INICIAIS', 'K')),
-    entrada: numCel(campo(l, cf, 'VALOR DA ENTRADA', 'L')),
-    confirmado: /^sim/i.test(campo(l, cf, 'PAGAMENTO CONFIRMADO', 'N')),
-    closer: campo(l, cf, 'CLOSER', 'J')
-  })).filter(r => r.origem || r.fechamento);
+  /* Fluxo de Clientes, uma planilha por ano: só o que a regra pede —
+     pagamento confirmado, pela data do fechamento, honorários iniciais como
+     retorno. O cliente é resolvido só por NOME de cabeçalho: em 2026 é
+     "CLIENTE (O MESMO DO CONTRATO)", em 2025 é "NOME COMPLETO", e a letra de
+     reserva pegava "PROGRESSO INDIVIDUAL" na planilha de 2025. */
+  const porNome = (l, cab, nomes) => {
+    for (const n of nomes) { const i = cab.indexOf(n); if (i >= 0 && l[i] != null && String(l[i]).trim()) return String(l[i]).trim(); }
+    return '';
+  };
+  const fluxo = [];
+  (bruto.fluxos || []).forEach(f => {
+    const cf = f.cab;
+    f.linhas.forEach(l => {
+      const r = {
+        planilha: f.planilha,
+        contato: dataISO(campo(l, cf, '1º CONTATO', 'A')), origem: campo(l, cf, 'ORIGEM', 'B'),
+        fechamento: dataISO(campo(l, cf, 'DATA DO FECHAMENTO', 'F')),
+        cliente: porNome(l, cf, ['CLIENTE (O MESMO DO CONTRATO)', 'NOME COMPLETO', 'CLIENTE', 'CONTATO (QUEM ESTÁ EM CONTATO)']),
+        produto: campo(l, cf, 'PRODUTO JURÍDICO', 'H'), honorarios: numCel(campo(l, cf, 'HONORÁRIOS INICIAIS', 'K')),
+        entrada: numCel(campo(l, cf, 'VALOR DA ENTRADA', 'L')),
+        confirmado: /^sim/i.test(campo(l, cf, 'PAGAMENTO CONFIRMADO', 'N')),
+        closer: campo(l, cf, 'CLOSER', 'J')
+      };
+      if (r.origem || r.fechamento) fluxo.push(r);
+    });
+  });
 
   const sync = {};
   (bruto.sync || []).slice(1).forEach(l => { if (l && l[0]) sync[String(l[0])] = l[1]; });
 
   const base = { campanhas, insights, janelas, anuncios, fluxo, manual, sync };
   base.mapa = casarOrigens(base);
+  /* Só entra na lista depois do casamento, para não concorrer com as
+     campanhas reais na semelhança. */
+  if (Object.values(base.mapa).some(m => m.campanha === CAMPANHA_GENERICA)) campanhas[CAMPANHA_GENERICA.id] = CAMPANHA_GENERICA;
   return base;
 }
 
@@ -1247,6 +1278,15 @@ function montarBase(bruto) {
    palavras, com as etiquetas entre colchetes pesando mais. */
 const tokens = s => normTxt(s).replace(/[\[\]()]/g, ' ').split(/[^a-z0-9]+/).filter(t => t.length > 1);
 const etiquetas = s => (String(s).match(/\[[^\]]+\]/g) || []).map(normTxt);
+
+/* Origem que é tráfego pago do Meta sem dizer qual campanha: "Meta Ads",
+   "LP Saúde", "Plano de Saúde [FORM]"… Comum na planilha de 2025, anterior à
+   convenção de nomear pela campanha. Não dá para creditar a uma campanha,
+   mas é retorno do investimento em Meta — vai para uma linha própria e para
+   os totais, em vez de sumir como "fora de campanha". */
+const RE_META_GENERICO = /^meta ads?$|^meta$|^facebook|^instagram|^lp |\[form\]|\[wpp\]|\[eng\]|\[conv\]|\[rmk\]|\[velha\]|\[nova\]|\[new\]|\[novos ads\]/i;
+const CAMPANHA_GENERICA = { id: '__meta__', nome: 'Meta Ads — campanha não identificada', conta: '',
+                            status: 'GENÉRICA', objetivo: '', orcDiario: 0, orcVitalicio: 0, origemOrc: '', inicio: null, fim: null };
 
 function casarOrigens(base) {
   const nomes = {};
@@ -1276,11 +1316,22 @@ function casarOrigens(base) {
            e vai para a aba Mapeamento. */
         const canal = arr => arr.map(e => e.replace(/[\[\]]/g, '')).find(e => /^(form|wpp|link-wpp|msg|site)$/.test(e)) || '';
         const conflito = canal(eo) && canal(ec) && canal(eo) !== canal(ec) ? 0.2 : 0;
-        const n = jac * 0.6 + etiqOk * 0.4 - conflito;
+        /* Produto diferente também é campanha diferente: "Isenção de IR" não
+           pode casar com "Rev. Plano de Saúde" só porque as duas têm [ENG]
+           [FORM]. */
+        const produtoDe = t => { const x = normTxt(t);
+          return /plano de saude|saude/.test(x) ? 'saude' : /financiamento/.test(x) ? 'financiamento'
+            : /isencao|imposto de renda|ir/.test(x) ? 'ir' : /abins|cbd/.test(x) ? 'abins' : /itiv/.test(x) ? 'itiv'
+            : /aereo/.test(x) ? 'aereo' : /procedimento|negativa/.test(x) ? 'procedimento' : /bancari/.test(x) ? 'bancario' : ''; };
+        const po = produtoDe(origem), pc = produtoDe(c.nome);
+        const conflitoProduto = po && pc && po !== pc ? 0.4 : 0;
+        const n = jac * 0.6 + etiqOk * 0.4 - conflito - conflitoProduto;
         if (n > nota) { nota = n; melhor = c; }
       }
       if (melhor && nota >= 0.6 && (eo.length || /rev\.|revisional|abins|itiv|plano|financiamento/i.test(origem))) {
         campanha = melhor; como = 'por semelhança (' + Math.round(nota * 100) + '%)';
+      } else if (RE_META_GENERICO.test(o)) {
+        campanha = CAMPANHA_GENERICA; como = 'Meta, sem campanha identificada';
       }
     }
     mapa[origem] = { origem, campanha, como };
@@ -1296,6 +1347,13 @@ function periodoAtual() {
   if (p === '30d')  { const i = new Date(hoje); i.setDate(i.getDate() - 29); return { ini: i, fim: hoje, rotulo: 'últimos 30 dias' }; }
   if (p === '3m')   return { ini: new Date(hoje.getFullYear(), hoje.getMonth() - 2, 1), fim: hoje, rotulo: 'últimos 3 meses' };
   if (p === 'ano')  return { ini: new Date(hoje.getFullYear(), 0, 1), fim: hoje, rotulo: 'este ano (' + hoje.getFullYear() + ')' };
+  if (p === 'tudo') {
+    /* Do primeiro dia com dado (do Meta ou de fechamento) até hoje. */
+    let ini = null;
+    (DADOS ? DADOS.insights : []).forEach(r => { if (!ini || r.data < ini) ini = r.data; });
+    (DADOS ? DADOS.fluxo : []).forEach(f => { if (f.fechamento && (!ini || f.fechamento < ini)) ini = f.fechamento; });
+    return { ini: ini || new Date(2025, 0, 1), fim: hoje, rotulo: 'todo o período' };
+  }
   if (p === 'mesSel' && FILTRO.ini) { const i = FILTRO.ini; const f = new Date(i.getFullYear(), i.getMonth() + 1, 0);
     return { ini: i, fim: f > hoje ? hoje : f, rotulo: MESES[i.getMonth()] + '/' + i.getFullYear() }; }
   if (p === 'custom' && FILTRO.ini && FILTRO.fim) return { ini: FILTRO.ini, fim: FILTRO.fim, rotulo: fmtData(FILTRO.ini) + ' a ' + fmtData(FILTRO.fim) };
@@ -1331,7 +1389,7 @@ function analisar(base) {
   const semCampanha = [];
   fechamentos.forEach(f => {
     const m = base.mapa[f.origem];
-    if (m && m.campanha && (FILTRO.conta === 'todas' || String(m.campanha.conta) === FILTRO.conta)) {
+    if (m && m.campanha && (FILTRO.conta === 'todas' || m.campanha === CAMPANHA_GENERICA || String(m.campanha.conta) === FILTRO.conta)) {
       const a = garantir(m.campanha);
       a.clientes++; a.retorno += f.honorarios; a.entrada += f.entrada; a.fechamentos.push(f);
     } else semCampanha.push(f);
@@ -1532,7 +1590,8 @@ function renderResultados(base, a) {
     5: () => listaFechamentos('Retorno financeiro no período', a.fechamentos.filter(f => base.mapa[f.origem] && base.mapa[f.origem].campanha), base)
   });
 
-  const st = s => s === 'ACTIVE' ? '<span class="tag-pct verde">Ativa</span>'
+  const st = s => s === 'GENÉRICA' ? '<span class="tag-pct neutro" title="fechamentos cuja origem diz Meta, mas não qual campanha">sem campanha</span>'
+    : s === 'ACTIVE' ? '<span class="tag-pct verde">Ativa</span>'
     : s === 'PAUSED' || s === 'CAMPAIGN_PAUSED' ? '<span class="tag-pct amarelo">Pausada</span>'
     : s === 'HISTÓRICO' ? '<span class="tag-pct neutro">Histórico</span>'
     : '<span class="tag-pct neutro">' + esc(s || '—') + '</span>';
@@ -1676,6 +1735,11 @@ function renderObsResultados(base, a) {
   if (roiRuim.length) obs.push(obsCard('critico', '&#128201;', 'Retorno abaixo do investido',
     roiRuim.map(l => '<b>' + esc(l.campanha.nome) + '</b>: ' + multTxt(l.roi) + ' por R$ 1').join(' · ') +
     '. Com honorários iniciais como retorno, abaixo de R$ 1 a campanha não se paga no período.'));
+  const generica = a.linhas.find(l => l.campanha === CAMPANHA_GENERICA);
+  if (generica && generica.clientes) obs.push(obsCard('info', '&#128204;', 'Retorno do Meta sem campanha identificada',
+    '<b>' + num(generica.clientes) + '</b> fechamento(s) e <b>' + moeda(generica.retorno) + '</b> vêm de origens que dizem ' +
+    'Meta mas não a campanha (“Meta Ads”, “LP Saúde”, “Plano de Saúde [FORM]”…). Entram nos totais e no ROI geral, ' +
+    'mas não no ROI de nenhuma campanha. Para atribuir, preencha a aba <b>Mapeamento</b>.'));
   const naoCasadas = Object.values(base.mapa).filter(m => !m.campanha && /\[|rev\.|revisional|ads/i.test(m.origem));
   if (naoCasadas.length) obs.push(obsCard('atencao', '&#128279;', 'Origens com cara de campanha sem casamento',
     naoCasadas.map(m => '<b>' + esc(m.origem) + '</b>').join(' · ') +

@@ -58,9 +58,9 @@ var ABA = {
 /* Valores iniciais de _Config. Depois de criados, quem manda e a aba. */
 var PADRAO_CONFIG = {
   META_AD_ACCOUNTS: '106339469723880,731383791781450',
-  /* Historico a partir de 2026: e o ano que interessa, e 9 meses carregam
-     em uma execucao so. */
-  DATA_INICIO: '2026-01-01',
+  /* Historico desde 2025. Sao 21 meses; a carga completa se retoma sozinha
+     quando passa dos 6 minutos do Apps Script. */
+  DATA_INICIO: '2025-01-01',
   /* 35, e nao 7: a incremental de hora em hora passa a cobrir o mes vigente
      inteiro, e o "mes atual" do painel nunca depende de o historico ter
      terminado. Sao ~40 campanhas x 35 dias por hora — leve para a API. */
@@ -422,6 +422,14 @@ function atualizarJanelasEAnuncios_() {
 
 /** Um clique: historico a partir de 01/01/2026 e incremental de 35 dias,
     gravados na aba _Config (que tem prioridade sobre os padroes do codigo). */
+/** Historico desde 01/01/2025 (21 meses, retomavel). */
+function definirInicio2025() {
+  gravarConfig_('DATA_INICIO', '2025-01-01');
+  gravarConfig_('DIAS_INCREMENTAL', '35');
+  gravarSync_({ etapa: 'config', mensagem: 'DATA_INICIO=2025-01-01 · DIAS_INCREMENTAL=35. Agora execute sincronizarCompleta.' });
+  alertar_('Pronto: histórico desde 01/01/2025. Agora execute sincronizarCompleta.');
+}
+
 function definirInicio2026() {
   gravarConfig_('DATA_INICIO', '2026-01-01');
   gravarConfig_('DIAS_INCREMENTAL', '35');
