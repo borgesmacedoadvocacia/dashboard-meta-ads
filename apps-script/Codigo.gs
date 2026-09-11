@@ -58,7 +58,9 @@ var ABA = {
 /* Valores iniciais de _Config. Depois de criados, quem manda e a aba. */
 var PADRAO_CONFIG = {
   META_AD_ACCOUNTS: '106339469723880,731383791781450',
-  DATA_INICIO: '2025-01-01',
+  /* Historico a partir de 2026: e o ano que interessa, e 9 meses carregam
+     em uma execucao so. */
+  DATA_INICIO: '2026-01-01',
   /* 35, e nao 7: a incremental de hora em hora passa a cobrir o mes vigente
      inteiro, e o "mes atual" do painel nunca depende de o historico ter
      terminado. Sao ~40 campanhas x 35 dias por hora — leve para a API. */
@@ -412,6 +414,28 @@ function atualizarJanelasEAnuncios_() {
   });
   reescrever_(abaJ, CAB.janelas, lj);
   reescrever_(abaA, CAB.anuncios, la);
+}
+
+/** Um clique: historico a partir de 01/01/2026 e incremental de 35 dias,
+    gravados na aba _Config (que tem prioridade sobre os padroes do codigo). */
+function definirInicio2026() {
+  gravarConfig_('DATA_INICIO', '2026-01-01');
+  gravarConfig_('DIAS_INCREMENTAL', '35');
+  gravarSync_({ etapa: 'config', mensagem: 'DATA_INICIO=2026-01-01 · DIAS_INCREMENTAL=35. Agora execute sincronizarCompleta.' });
+  alertar_('Pronto: histórico desde 01/01/2026 e incremental de 35 dias. Agora execute sincronizarCompleta.');
+}
+
+function gravarConfig_(chave, valor) {
+  var ss = planilha_();
+  var aba = garantirAba_(ss, ABA.config, CAB.config);
+  var ult = aba.getLastRow();
+  if (ult > 1) {
+    var v = aba.getRange(2, 1, ult - 1, 1).getValues();
+    for (var i = 0; i < v.length; i++) {
+      if (String(v[i][0]) === chave) { aba.getRange(i + 2, 2).setValue(valor); return; }
+    }
+  }
+  aba.getRange(aba.getLastRow() + 1, 1, 1, 3).setValues([[chave, valor, DESCRICAO_CONFIG[chave] || '']]);
 }
 
 /* ============================================================ DEPURAÇÃO */
