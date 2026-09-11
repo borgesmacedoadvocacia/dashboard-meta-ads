@@ -237,8 +237,13 @@ function continuarSincronizacao() {
     atualizarCampanhas_();
     atualizarJanelasEAnuncios_();
     props_().deleteProperty('cursor');
+    /* Historico sem nenhuma linha enquanto as janelas trazem gasto nao e
+       "concluido": e a chamada dia a dia sendo recusada em silencio. */
+    var aviso = cur.gravadas === 0
+      ? ' ATENÇÃO: nenhuma linha dia a dia voltou do Meta. Rode depurarInsights() e veja o Registro.'
+      : '';
     gravarSync_({ status: 'ocioso', etapa: 'completa', progresso: 100, ultimaOk: agoraTxt_(), ultimoErro: '',
-                  mensagem: 'Histórico concluído: ' + cur.gravadas + ' linhas de campanha×dia.' });
+                  mensagem: 'Histórico concluído: ' + cur.gravadas + ' linhas de campanha×dia.' + aviso });
   } catch (e) {
     gravarSync_({ status: 'erro', ultimoErro: agoraTxt_() + ' — ' + e.message, mensagem: 'Falhou: ' + e.message });
     throw e;
@@ -392,6 +397,47 @@ function atualizarJanelasEAnuncios_() {
   });
   reescrever_(abaJ, CAB.janelas, lj);
   reescrever_(abaA, CAB.anuncios, la);
+}
+
+/* ============================================================ DEPURAÇÃO */
+
+/** Pede os ultimos 3 dias de tres formas e registra o que cada uma devolve.
+    Serve para descobrir qual sintaxe de intervalo esta conta aceita quando o
+    dia a dia volta vazio. Resultado no Registro de execucao. */
+function depurarInsights() {
+  var conta = contas_()[0];
+  var fim = hoje_(), ini = new Date(fim.getTime() - 2 * 86400000);
+  var since = iso_(ini), until = iso_(fim);
+  var variantes = [
+    ['A: time_range JSON + time_increment=1',
+      { level: 'campaign', time_increment: 1, fields: 'campaign_name,spend', limit: 50,
+        time_range: JSON.stringify({ since: since, until: until }) }],
+    ['B: time_range[since]/[until] + time_increment=1',
+      { level: 'campaign', time_increment: 1, fields: 'campaign_name,spend', limit: 50,
+        'time_range[since]': since, 'time_range[until]': until }],
+    ['C: date_preset=last_7d + time_increment=1',
+      { level: 'campaign', time_increment: 1, fields: 'campaign_name,spend', limit: 50,
+        date_preset: 'last_7d' }],
+    ['D: time_range JSON SEM time_increment',
+      { level: 'campaign', fields: 'campaign_name,spend', limit: 50,
+        time_range: JSON.stringify({ since: since, until: until }) }]
+  ];
+  var saida = ['conta ' + conta + ' · ' + since + ' a ' + until];
+  variantes.forEach(function (v) {
+    try {
+      var r = chamarMeta_('act_' + conta + '/insights', v[1]);
+      var n = (r.data || []).length;
+      var ex = n ? r.data[0] : null;
+      saida.push(v[0] + ' -> ' + n + ' linha(s)' +
+        (ex ? ' · ex.: ' + (ex.date_start || '?') + ' ' + String(ex.campaign_name || '').slice(0, 30) + ' R$ ' + ex.spend : ''));
+    } catch (e) {
+      saida.push(v[0] + ' -> ERRO: ' + e.message);
+    }
+  });
+  var texto = saida.join('\n');
+  Logger.log(texto);
+  gravarSync_({ etapa: 'depuracao', mensagem: texto.slice(0, 480) });
+  return texto;
 }
 
 /* =================================================================== META */
