@@ -1120,11 +1120,21 @@ async function lerAbasDe(sheetId, ranges) {
   return ((await resp.json()).valueRanges || []).map(vr => vr.values || []);
 }
 
-/* Uma planilha de Fluxo por ano (2026, 2025…). O cofre traz a lista em
-   FLUXO_SHEET_IDS; FLUXO_SHEET_ID sozinho continua aceito. */
+/* Uma planilha de Fluxo por ano (2026, 2025…). Os IDs ficam AQUI, no
+   código, e não só no cofre: a sessão guardada no navegador é a de quando a
+   pessoa entrou, e uma sessão aberta antes de a planilha de 2025 existir no
+   cofre continuaria lendo só 2026 até o navegador ser fechado — foi o que
+   aconteceu. Os IDs não são segredo (as planilhas são compartilhadas por
+   link); o que o cofre protege é a chave da API. O cofre pode acrescentar
+   planilhas; nunca remove estas. */
+const FLUXOS_PADRAO = [
+  '1FWbG3Xuo8TjFfi0puF6E9GFsXrUb6fRdollTfq9-4Dg',   // FLUXO DE CLIENTES [2026]
+  '1nQGtxa97k5vamnt7udQJvjcNadBFAWHgd6v6dvOhI1c'    // FLUXO DE CLIENTES - 2025
+];
 function planilhasFluxo() {
-  if (Array.isArray(CONFIG.FLUXO_SHEET_IDS) && CONFIG.FLUXO_SHEET_IDS.length) return CONFIG.FLUXO_SHEET_IDS;
-  return CONFIG.FLUXO_SHEET_ID ? [CONFIG.FLUXO_SHEET_ID] : [];
+  const doCofre = Array.isArray(CONFIG.FLUXO_SHEET_IDS) ? CONFIG.FLUXO_SHEET_IDS
+                : CONFIG.FLUXO_SHEET_ID ? [CONFIG.FLUXO_SHEET_ID] : [];
+  return [...new Set(FLUXOS_PADRAO.concat(doCofre))];
 }
 
 async function buscarTudo() {
@@ -1434,7 +1444,12 @@ function analisar(base) {
   /* O gasto do mês que o PRÓPRIO Meta calcula (aba Janelas, janela "mes") é o
      número do Gerenciador — serve de conferência quando o recorte é o mês. */
   const gastoMetaMes = base.janelas.filter(j => j.janela === 'mes' && daConta(j)).reduce((t, j) => t + j.gasto, 0);
-  const cobertura = { faltando, gastoMetaMes, ehMesAtual: FILTRO.periodo === 'mes' };
+  /* O Meta só devolve linha para dia com veiculação: um dia solto sem linha
+     no meio do período pode ser dia sem entrega, não buraco na carga. Grave
+     é faltar do INÍCIO do período (histórico não carregado) ou faltar vários
+     dias. */
+  const grave = faltando.length >= 3 || (faltando.length > 0 && chaveDia(faltando[0]) === chaveDia(per.ini));
+  const cobertura = { faltando, grave, gastoMetaMes, ehMesAtual: FILTRO.periodo === 'mes' };
 
   return { per, linhas, tot, fechamentos, semCampanha, serie, ultimaData, diasDoMes, cobertura };
 }
@@ -1559,14 +1574,17 @@ function renderResultados(base, a) {
 
   const corRoi = tot.roi === null ? 'azul' : tot.roi >= 3 ? 'verde' : tot.roi >= 1 ? 'amarelo' : 'vermelho';
   const cob = a.cobertura;
-  const faltaTxt = cob.faltando.length
+  const faltaTxt = cob.faltando.length && !cob.grave
+    ? num(linhas.filter(l => l.gasto > 0).length) + ' campanha(s) com gasto · ' + cob.faltando.length +
+      ' dia sem linha no Meta (provável dia sem veiculação)'
+    : cob.faltando.length
     ? '<b style="color:var(--amarelo)">faltam ' + cob.faltando.length + ' dia(s) na planilha</b>' +
       (cob.ehMesAtual && cob.gastoMetaMes ? ' · o Meta informa <b>' + moeda(cob.gastoMetaMes) + '</b> no mês' : '')
     : num(linhas.filter(l => l.gasto > 0).length) + ' campanha(s) com gasto no período' +
       (cob.ehMesAtual && cob.gastoMetaMes && Math.abs(cob.gastoMetaMes - tot.gasto) > Math.max(5, tot.gasto * 0.02)
         ? ' · Meta informa <b>' + moeda(cob.gastoMetaMes) + '</b>' : '');
   document.getElementById('kpis').innerHTML = [
-    cartaoKPI('Valor gasto', moeda(tot.gasto), cob.faltando.length ? 'amarelo' : 'azul', '<span>' + faltaTxt + '</span>'),
+    cartaoKPI('Valor gasto', moeda(tot.gasto), cob.grave ? 'amarelo' : 'azul', '<span>' + faltaTxt + '</span>'),
     cartaoKPI('Orçamento diário', moeda(tot.orcDiario), 'azul',
       '<span>campanhas ativas · <b>' + moeda(tot.orcMensal) + '</b> no mês (× ' + a.diasDoMes + ' dias)</span>'),
     cartaoKPI('Leads', num(tot.leads), 'roxo',
@@ -1709,7 +1727,7 @@ function renderObsResultados(base, a) {
     obs.push(obsCard('critico', '&#9888;', 'Ainda não há dados do Meta',
       'A planilha <i>Campanhas Meta Ads</i> não tem linhas em <b>Insights diários</b>. Rode <b>BM · Meta Ads → Sincronizar completa</b> no Apps Script.'));
   }
-  if (a.cobertura.faltando.length && base.insights.length) {
+  if (a.cobertura.grave && base.insights.length) {
     const f = a.cobertura.faltando;
     const lista = f.length <= 6 ? f.map(d => d.getDate() + '/' + (d.getMonth() + 1)).join(', ')
       : fmtData(f[0]) + ' a ' + fmtData(f[f.length - 1]) + ' (' + f.length + ' dias)';
