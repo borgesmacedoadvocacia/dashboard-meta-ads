@@ -450,6 +450,58 @@ function gravarConfig_(chave, valor) {
   aba.getRange(aba.getLastRow() + 1, 1, 1, 3).setValues([[chave, valor, DESCRICAO_CONFIG[chave] || '']]);
 }
 
+/* ============================================================== TOKEN */
+
+/** Diz se o token que esta nas Propriedades do script ainda vale e, se
+    META_APP_ID e META_APP_SECRET estiverem nas propriedades, ate quando.
+    Resultado no Registro de execucao e na aba _Sync. */
+function verificarToken() {
+  var texto;
+  try {
+    var r = chamarMeta_('me', { fields: 'id,name' });
+    texto = 'Token válido — ' + (r.name || r.id) + '. ';
+    try {
+      var props = PropertiesService.getScriptProperties();
+      var appId = props.getProperty('META_APP_ID'), appSecret = props.getProperty('META_APP_SECRET');
+      if (appId && appSecret) {
+        var d = chamarMeta_('debug_token', { input_token: props.getProperty('META_ACCESS_TOKEN'),
+                                             access_token: appId + '|' + appSecret });
+        var exp = d.data && d.data.expires_at;
+        texto += exp ? 'Expira em ' + Utilities.formatDate(new Date(exp * 1000), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm') + '.'
+                     : 'Sem data de expiração (nunca expira).';
+      }
+    } catch (e2) { texto += '(validade não consultada: ' + e2.message + ')'; }
+  } catch (e) {
+    texto = 'Token INVÁLIDO: ' + e.message + ' → gere um token de Usuário do Sistema (nunca expira) e cole em Propriedades do script → META_ACCESS_TOKEN.';
+  }
+  gravarSync_({ etapa: 'token', mensagem: texto.slice(0, 480) });
+  alertar_(texto);
+  return texto;
+}
+
+/** Troca o token atual (de usuario, curta duracao) por um de longa duracao
+    (~60 dias) e grava nas Propriedades. Exige META_APP_ID e META_APP_SECRET
+    nas Propriedades do script. E paliativo: o definitivo e o token de
+    Usuario do Sistema, que nao expira. */
+function trocarPorTokenLongaDuracao() {
+  var props = PropertiesService.getScriptProperties();
+  var appId = props.getProperty('META_APP_ID'), appSecret = props.getProperty('META_APP_SECRET');
+  var atual = props.getProperty('META_ACCESS_TOKEN');
+  if (!appId || !appSecret) throw new Error('Coloque META_APP_ID e META_APP_SECRET nas Propriedades do script (developers.facebook.com → seu app → Configurações → Básico).');
+  if (!atual) throw new Error('META_ACCESS_TOKEN vazio.');
+  var r = chamarMeta_('oauth/access_token', {
+    grant_type: 'fb_exchange_token', client_id: appId, client_secret: appSecret, fb_exchange_token: atual
+  });
+  if (!r.access_token) throw new Error('O Meta não devolveu token: ' + JSON.stringify(r).slice(0, 200));
+  props.setProperty('META_ACCESS_TOKEN', r.access_token);
+  var dias = r.expires_in ? Math.round(r.expires_in / 86400) : null;
+  var texto = 'Token de longa duração gravado' + (dias ? ' — vale ' + dias + ' dias.' : '.') +
+              ' O token de Usuário do Sistema não expira e dispensa isso.';
+  gravarSync_({ etapa: 'token', mensagem: texto });
+  alertar_(texto);
+  return texto;
+}
+
 /* ============================================================ DEPURAÇÃO */
 
 /** Pede os ultimos 3 dias de tres formas e registra o que cada uma devolve.
@@ -499,11 +551,14 @@ function depurarInsights() {
 /** Uma chamada ao Graph API com repeticao em erro transitorio. */
 function chamarMeta_(caminho, params) {
   var token = PropertiesService.getScriptProperties().getProperty('META_ACCESS_TOKEN');
-  if (!token) throw new Error('META_ACCESS_TOKEN não está nas Propriedades do script.');
+  if (!token && !(params && params.access_token) && caminho.indexOf('oauth/') !== 0)
+    throw new Error('META_ACCESS_TOKEN não está nas Propriedades do script.');
   var q = Object.keys(params || {}).map(function (k) {
     return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
   });
-  q.push('access_token=' + encodeURIComponent(token));
+  /* Chamadas que já trazem o próprio access_token (troca de token, debug)
+     não recebem o do script por cima. */
+  if (!(params && params.access_token) && caminho.indexOf('oauth/') !== 0) q.push('access_token=' + encodeURIComponent(token));
   var url = caminho.indexOf('http') === 0 ? caminho : API + caminho + '?' + q.join('&');
 
   var ultimo = null;

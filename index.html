@@ -1558,10 +1558,17 @@ function pintarSync(base) {
   const s = base.sync || {};
   const el = document.getElementById('syncInfo');
   const rod = String(s.status || '') === 'rodando';
+  /* Token vencido é o erro mais provável e o único que o painel não resolve:
+     diz o que fazer, em vez de só repetir a mensagem do Meta. */
+  const erro = String(s.ultimoErro || '');
+  const tokenVencido = /token/i.test(erro) && /expired|invalid|validating|session/i.test(erro);
   el.innerHTML = rod
     ? '<b>Buscando no Meta…</b> ' + esc(String(s.progresso || 0)) + '% · ' + esc(String(s.mensagem || '').slice(0, 80))
     : (s.ultimaOk ? 'Meta lido em <b>' + esc(String(s.ultimaOk)) + '</b>' : '<b>Apps Script ainda não sincronizou</b>') +
-      (s.ultimoErro ? ' · <span style="color:var(--vermelho)">' + esc(String(s.ultimoErro).slice(0, 90)) + '</span>' : '');
+      (tokenVencido
+        ? ' · <span style="color:var(--vermelho)"><b>o token do Meta expirou</b> — os dados pararam nessa hora. ' +
+          'Gere um token de <b>Usuário do Sistema</b> (nunca expira) e cole em Propriedades do script → META_ACCESS_TOKEN.</span>'
+        : erro ? ' · <span style="color:var(--vermelho)">' + esc(erro.slice(0, 90)) + '</span>' : '');
 }
 
 /* ---------- página 1 ---------- */
