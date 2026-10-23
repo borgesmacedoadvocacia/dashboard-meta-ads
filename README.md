@@ -53,6 +53,9 @@ do script → `META_ACCESS_TOKEN`*. O do Kommo, idem, em `KOMMO_TOKEN`.
   incremental de hora em hora mantém a aba sozinha; se o Kommo falhar, a sincronização do Meta
   segue normalmente e o erro fica em `_Sync` (`kommoErro`).
 - O histórico do Kommo começa em **junho de 2025** — antes disso a etapa não era usada.
+- A aba **Mapeamento** vale também para o campo `Campanha` do Kommo: quando a automação do
+  WhatsApp continua carimbando o nome de uma campanha antiga, aponte o nome velho para a que
+  está no ar e as reuniões passam a cair na linha certa.
 
 ## O que é exibido
 

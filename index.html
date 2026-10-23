@@ -619,7 +619,8 @@
           </table>
         </div>
         <div class="secao-sub" style="margin:.6rem 0 0 0">Para corrigir um casamento, preencha a aba <b>Mapeamento</b> da planilha
-          <i>Campanhas Meta Ads</i> (Origem → nome exato da campanha). O que estiver lá vence o casamento automático.</div>
+          <i>Campanhas Meta Ads</i> (Origem → nome exato da campanha). O que estiver lá vence o casamento automático —
+          e vale também para o campo <b>Campanha</b> do Kommo, quando a automação carimba o nome de uma campanha antiga.</div>
       </div>
     </section>
 
@@ -1470,7 +1471,11 @@ function casarOrigens(base) {
 
 /* O Kommo grava no lead o NOME EXATO da campanha do Meta, então quase tudo
    casa por nome idêntico; a semelhança só entra quando a campanha foi
-   renomeada depois que o lead chegou. */
+   renomeada depois que o lead chegou.
+
+   A aba Mapeamento vale aqui também, e é o conserto para quando a automação
+   do WhatsApp continua carimbando o nome de uma campanha antiga: basta
+   apontar o nome velho para a campanha que está no ar. */
 function casarCampanhasKommo(base) {
   const nomes = {};
   Object.values(base.campanhas).forEach(c => { nomes[normTxt(c.nome)] = c; });
@@ -1478,6 +1483,9 @@ function casarCampanhasKommo(base) {
   const mapa = {};
   [...new Set(base.reunioes.map(r => r.campanha).filter(Boolean))].forEach(nome => {
     const n = normTxt(nome);
+    if (base.manual[n] && nomes[base.manual[n]]) {
+      mapa[nome] = { nome, campanha: nomes[base.manual[n]], como: 'aba Mapeamento' }; return;
+    }
     if (nomes[n]) { mapa[nome] = { nome, campanha: nomes[n], como: 'nome idêntico' }; return; }
     const m = melhorPorSemelhanca(nome, lista);
     mapa[nome] = m.campanha && m.nota >= 0.6
