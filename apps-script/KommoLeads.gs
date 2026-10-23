@@ -21,7 +21,7 @@
    ========================================================================= */
 
 var KL_ABA = 'Leads';
-var KL_CAB = ['ID', 'Criado em', 'Hora', 'Funil', 'Etapa', 'Situação', 'Origem', 'Campanha',
+var KL_CAB = ['ID', 'Lead', 'Criado em', 'Hora', 'Funil', 'Etapa', 'Situação', 'Origem', 'Campanha',
               'Produto jurídico', 'Plano de saúde', 'Tipo do plano', 'Mensalidade',
               'Tempo de plano', 'Responsável', 'Reunião em', 'Atualizado em'];
 
@@ -163,6 +163,7 @@ function linhasDeLeads_(leads, funis, usuarios, reunioes, inicio) {
     var etapa = funil.etapas[l.status_id] || '';
     out.push([
       String(l.id),
+      l.name || '',
       Utilities.formatDate(criado, tz, 'yyyy-MM-dd'),
       Utilities.formatDate(criado, tz, 'HH:mm'),
       funil.nome,
@@ -240,8 +241,8 @@ function mesclarLeads_(novas) {
   var todas = [];
   for (var k in porId) todas.push(porId[k]);
   todas.sort(function (a, b) {
-    var da = dataTxt_(a[1]), db = dataTxt_(b[1]);
-    return da < db ? -1 : da > db ? 1 : String(a[2]).localeCompare(String(b[2]));
+    var da = dataTxt_(a[2]), db = dataTxt_(b[2]);
+    return da < db ? -1 : da > db ? 1 : String(a[3]).localeCompare(String(b[3]));
   });
   reescrever_(aba, KL_CAB, todas);
   return todas.length;
