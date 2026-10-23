@@ -113,6 +113,9 @@ function onOpen() {
     .addItem('Sincronizar completa (histórico)', 'sincronizarCompleta')
     .addItem('Atualizar só campanhas e anúncios', 'atualizarCampanhasEAnuncios')
     .addSeparator()
+    .addItem('Reuniões do Kommo (histórico)', 'sincronizarKommoCompleta')
+    .addItem('Testar conexão com o Kommo', 'verificarKommo')
+    .addSeparator()
     .addItem('Testar conexão com o Meta', 'testarConexao')
     .addItem('Configurar tudo (1ª vez)', 'configurarTudo')
     .addItem('Recriar gatilho de hora em hora', 'criarGatilhoHorario')
@@ -183,6 +186,11 @@ function sincronizarIncremental() {
     });
     atualizarCampanhas_();
     atualizarJanelasEAnuncios_();
+    /* As reuniões vêm do Kommo, não do Meta: um erro lá (token vencido, API
+       fora) não pode derrubar a sincronização das campanhas, que é o que o
+       painel tem de mostrar de qualquer jeito. */
+    try { sincronizarKommo(); }
+    catch (e) { gravarSync_({ kommoErro: agoraTxt_() + ' — ' + e.message }); }
     gravarSync_({ status: 'ocioso', etapa: 'incremental', progresso: 100,
                   ultimaOk: agoraTxt_(), ultimoErro: '',
                   mensagem: 'Incremental concluída: ' + total + ' linhas de campanha×dia gravadas.' });

@@ -25,17 +25,41 @@ O Apps Script (`apps-script/Codigo.gs`, vinculado à planilha) grava:
 | Anúncios | anúncio × janela (7 e 30 dias) — é onde se vê qual criativo ganha e qual cansou |
 | Campanhas | orçamento diário/vitalício (somando conjuntos quando o orçamento é por conjunto) e status |
 | Mapeamento | ORIGEM do Fluxo de Clientes → nome exato da campanha; o que estiver aqui vence o casamento automático |
-| _Config | contas, data de início, tipos de ação que contam como lead |
+| Reuniões | uma linha por lead que entrou na etapa **Enviado ao ADVBOX** do Kommo — data, lead, campanha, origem e produto |
+| _Config | contas, data de início, tipos de ação que contam como lead, subdomínio e etapa do Kommo |
 | _Sync | estado da última sincronização, mostrado no topo do painel |
 
 O token do Meta **não fica no código**: vive em *Configurações do projeto → Propriedades
-do script → `META_ACCESS_TOKEN`*.
+do script → `META_ACCESS_TOKEN`*. O do Kommo, idem, em `KOMMO_TOKEN`.
+
+## Reuniões marcadas (Kommo)
+
+`apps-script/Kommo.gs` traz para a planilha as reuniões marcadas. Reunião marcada = lead que
+**entrou na etapa `Enviado ao ADVBOX`**, etapa que existe nos dois funis comerciais
+(`[API]` e `[SP] CRM Comercial`).
+
+- Conta-se a **entrada** na etapa, lida pela API de eventos (`lead_status_changed` filtrada por
+  `value_after`), e não quem está parado nela: lead que já avançou para *Pesquisa de Satisfação*
+  ou foi ganho marcou reunião do mesmo jeito. A data da reunião é a da mudança de etapa.
+- Um lead é **uma reunião só**, na primeira vez que entrou — quem vai e volta no funil não vira
+  duas.
+- A campanha vem do campo personalizado **`Campanha`** do lead, que o Kommo recebe do Meta com o
+  nome exato da campanha; por isso quase tudo casa por nome idêntico, e a semelhança (a mesma do
+  Fluxo de Clientes) só entra quando a campanha foi renomeada depois. Lead com o campo vazio ou
+  `-` (≈20% em 2026, entrada manual e indicação) fica fora da tabela e aparece em
+  *Pontos de atenção*.
+- Primeira instalação: `KOMMO_TOKEN` nas Propriedades do script → `configurarKommo` →
+  `verificarKommo` → **BM · Meta Ads → Reuniões do Kommo (histórico)**. Depois disso a
+  incremental de hora em hora mantém a aba sozinha; se o Kommo falhar, a sincronização do Meta
+  segue normalmente e o erro fica em `_Sync` (`kommoErro`).
+- O histórico do Kommo começa em **junho de 2025** — antes disso a etapa não era usada.
 
 ## O que é exibido
 
 **Resultados das campanhas** — por período (mês atual por padrão; últimos 30 dias, últimos
 3 meses, este ano, todo o período, mês escolhido ou período livre): nome, orçamento diário e mensal, gasto,
-leads, custo por lead, clientes, retorno financeiro, conversão lead → cliente, CAC e ROI.
+leads, custo por lead, **reuniões marcadas e conversão lead → reunião**, clientes, retorno financeiro,
+conversão lead → cliente, CAC e ROI.
 Retorno = **honorários iniciais** dos fechamentos com **pagamento confirmado**, pela **data do
 fechamento**, cujo campo ORIGEM casa com a campanha. Fórmulas: CPL = gasto ÷ leads ·
 Conversão = clientes ÷ leads · CAC = gasto ÷ clientes · ROI = retorno ÷ gasto.
@@ -59,5 +83,6 @@ dependência de um único anúncio).
 ```
 index.html              painel (HTML + CSS + JS, sem build)
 apps-script/Codigo.gs   coletor Meta → planilha (colar no Apps Script da planilha)
+apps-script/Kommo.gs    coletor das reuniões marcadas no Kommo → aba Reuniões
 logo.png / favicon.png
 ```

@@ -556,8 +556,9 @@
 
     <section class="secao">
       <div class="secao-titulo">Campanha a campanha</div>
-      <div class="secao-sub">CPL = gasto ÷ leads · Conversão = clientes ÷ leads · CAC = gasto ÷ clientes · ROI = retorno ÷ gasto (quanto voltou por R$ 1).
-        Orçamento mensal = orçamento diário × dias do mês corrente.<br>
+      <div class="secao-sub">CPL = gasto ÷ leads · <b>Reuniões</b> = leads que entraram na etapa <b>Enviado ao ADVBOX</b> do Kommo no período, pela data em que
+        foram movidos · <b>Conv. reunião</b> = reuniões ÷ leads · Conversão = clientes ÷ leads · CAC = gasto ÷ clientes ·
+        ROI = retorno ÷ gasto (quanto voltou por R$ 1). Orçamento mensal = orçamento diário × dias do mês corrente.<br>
         <b>Clique no título de uma coluna para ordenar</b> — clicar de novo inverte. Linha sem valor fica sempre no fim.
         A ordem escolhida continua valendo na próxima visita; o total e os gráficos não mudam com ela.</div>
       <div class="card">
@@ -565,7 +566,8 @@
           <table id="tabelaCampanhas">
             <thead><tr>
               <th>Campanha</th><th>Status</th><th>Orç. diário</th><th>Orç. mensal</th><th>Gasto</th>
-              <th>Leads</th><th>CPL</th><th>Clientes</th><th>Retorno</th><th>Conversão</th><th>CAC</th><th>ROI</th>
+              <th>Leads</th><th>CPL</th><th>Reuniões</th><th>Conv. reunião</th>
+              <th>Clientes</th><th>Retorno</th><th>Conversão</th><th>CAC</th><th>ROI</th>
             </tr></thead>
             <tbody id="corpoCampanhas"></tbody>
             <tfoot id="rodapeCampanhas"></tfoot>
@@ -1165,6 +1167,7 @@ function ligarKPIs(mapa) {
    ========================================================================= */
 
 const ABAS_META = ['Insights diários', 'Janelas', 'Anúncios', 'Campanhas', 'Mapeamento', '_Sync'];
+const ABA_REUNIOES = 'Reuniões';
 const ABA_FLUXO = 'DADOS';
 const LS_WEBAPP = 'bm_metaads_webapp';
 const LS_TOKEN  = 'bm_metaads_token';
@@ -1208,15 +1211,21 @@ function planilhasFluxo() {
 
 async function buscarTudo() {
   const ids = planilhasFluxo();
-  const [meta, ...fluxos] = await Promise.all([
-    lerAbasDe(CONFIG.SHEET_ID, ABAS_META.map(aspas))
+  /* Reuniões vai em chamada própria, e não no lote das abas do Meta: a aba é
+     criada pelo coletor do Kommo e, enquanto não existir, um range inválido
+     derrubaria o batchGet inteiro — o painel sumiria por causa de uma coluna. */
+  const [meta, reunioes, ...fluxos] = await Promise.all([
+    lerAbasDe(CONFIG.SHEET_ID, ABAS_META.map(aspas)),
+    lerAbasDe(CONFIG.SHEET_ID, [aspas(ABA_REUNIOES)]).catch(e => {
+      console.warn('Aba ' + ABA_REUNIOES + ' indisponível: ' + e.message); return [[]];
+    })
   ].concat(ids.map(id => lerAbasDe(id, [aspas(ABA_FLUXO)]).catch(e => {
     console.warn('Fluxo ' + id + ' não respondeu: ' + e.message); return [[]];
   }))));
   const t = i => tabela(meta[i] || []);
   return montarBase({
     insights: t(0), janelas: t(1), anuncios: t(2), campanhas: t(3), mapeamento: t(4),
-    sync: meta[5] || [],
+    sync: meta[5] || [], reunioes: tabela(reunioes[0] || []),
     /* Cada planilha tem o próprio cabeçalho: resolve-se por nome em cada uma. */
     fluxos: fluxos.map((f, i) => Object.assign(tabela(f[0] || []), { planilha: ids[i] }))
   });
@@ -1250,7 +1259,8 @@ const divisao = (a, b) => b ? a / b : null;
 /* ------------------------------------------------------------- base */
 function montarBase(bruto) {
   const c = bruto.campanhas.cab, ci = bruto.insights.cab, cj = bruto.janelas.cab,
-        ca = bruto.anuncios.cab, cm = bruto.mapeamento.cab;
+        ca = bruto.anuncios.cab, cm = bruto.mapeamento.cab,
+        cr = (bruto.reunioes || { cab: [], linhas: [] }).cab;
 
   /* Campanhas: identidade, orçamento e status. */
   const campanhas = {};
@@ -1304,6 +1314,20 @@ function montarBase(bruto) {
     conjuntoId: campo(l, ca, 'ID do conjunto', 'E'), conjunto: campo(l, ca, 'Conjunto', 'F'),
     adId: campo(l, ca, 'ID do anúncio', 'G'), anuncio: campo(l, ca, 'Anúncio', 'H') })).filter(r => r.adId);
 
+  /* Reuniões marcadas (Kommo): uma linha por lead que ENTROU na etapa
+     "Enviado ao ADVBOX". A data é a da mudança de etapa — é quando a reunião
+     foi marcada, não quando o lead entrou no funil. */
+  const reunioes = ((bruto.reunioes || { linhas: [] }).linhas).map(l => ({
+    data: dataISO(campo(l, cr, 'Data', 'A')),
+    hora: campo(l, cr, 'Hora', 'B'),
+    funil: campo(l, cr, 'Funil', 'C'),
+    leadId: campo(l, cr, 'ID do lead', 'D'),
+    lead: campo(l, cr, 'Lead', 'E'),
+    campanha: campo(l, cr, 'Campanha', 'F'),
+    origem: campo(l, cr, 'Origem', 'G'),
+    produto: campo(l, cr, 'Produto jurídico', 'H')
+  })).filter(r => r.data);
+
   /* Mapeamento manual: Origem -> nome exato da campanha. */
   const manual = {};
   bruto.mapeamento.linhas.forEach(l => {
@@ -1342,8 +1366,9 @@ function montarBase(bruto) {
   const sync = {};
   (bruto.sync || []).slice(1).forEach(l => { if (l && l[0]) sync[String(l[0])] = l[1]; });
 
-  const base = { campanhas, insights, janelas, anuncios, fluxo, manual, sync };
+  const base = { campanhas, insights, janelas, anuncios, fluxo, manual, sync, reunioes };
   base.mapa = casarOrigens(base);
+  base.mapaReuniao = casarCampanhasKommo(base);
   /* Só entra na lista depois do casamento, para não concorrer com as
      campanhas reais na semelhança. */
   if (Object.values(base.mapa).some(m => m.campanha === CAMPANHA_GENERICA)) campanhas[CAMPANHA_GENERICA.id] = CAMPANHA_GENERICA;
@@ -1367,6 +1392,38 @@ const RE_META_GENERICO = /^meta ads?$|^meta$|^facebook|^instagram|^lp |\[form\]|
 const CAMPANHA_GENERICA = { id: '__meta__', nome: 'Meta Ads — campanha não identificada', conta: '',
                             status: 'GENÉRICA', objetivo: '', orcDiario: 0, orcVitalicio: 0, origemOrc: '', inicio: null, fim: null };
 
+/** Melhor campanha para um nome livre (ORIGEM do Fluxo, campo Campanha do
+    Kommo), pela sobreposição de palavras e etiquetas. Devolve a nota junto:
+    quem chama decide o corte e o que fazer com o que não passou. */
+function melhorPorSemelhanca(nome, lista) {
+  const to = new Set(tokens(nome)), eo = etiquetas(nome);
+  let melhor = null, nota = 0;
+  for (const c of lista) {
+    const tc = new Set(tokens(c.nome)), ec = etiquetas(c.nome);
+    const comuns = [...to].filter(t => tc.has(t)).length;
+    const jac = comuns / Math.max(1, new Set([...to, ...tc]).size);
+    const etiqOk = eo.length && ec.length ? eo.filter(e => ec.includes(e)).length / Math.max(eo.length, ec.length) : 0;
+    /* Canal diferente ([FORM] × [WPP] × [LINK-WPP]) é campanha diferente,
+       por mais que o produto seja o mesmo. Creditar honorários à campanha
+       errada é pior do que deixar sem casar — sem casar aparece no aviso
+       e vai para a aba Mapeamento. */
+    const canal = arr => arr.map(e => e.replace(/[\[\]]/g, '')).find(e => /^(form|wpp|link-wpp|msg|site)$/.test(e)) || '';
+    const conflito = canal(eo) && canal(ec) && canal(eo) !== canal(ec) ? 0.2 : 0;
+    /* Produto diferente também é campanha diferente: "Isenção de IR" não
+       pode casar com "Rev. Plano de Saúde" só porque as duas têm [ENG]
+       [FORM]. */
+    const produtoDe = t => { const x = normTxt(t);
+      return /plano de saude|saude/.test(x) ? 'saude' : /financiamento/.test(x) ? 'financiamento'
+        : /isencao|imposto de renda|ir/.test(x) ? 'ir' : /abins|cbd/.test(x) ? 'abins' : /itiv/.test(x) ? 'itiv'
+        : /aereo/.test(x) ? 'aereo' : /procedimento|negativa/.test(x) ? 'procedimento' : /bancari/.test(x) ? 'bancario' : ''; };
+    const po = produtoDe(nome), pc = produtoDe(c.nome);
+    const conflitoProduto = po && pc && po !== pc ? 0.4 : 0;
+    const n = jac * 0.6 + etiqOk * 0.4 - conflito - conflitoProduto;
+    if (n > nota) { nota = n; melhor = c; }
+  }
+  return { campanha: melhor, nota, etiquetas: eo };
+}
+
 function casarOrigens(base) {
   const nomes = {};
   Object.values(base.campanhas).forEach(c => { nomes[normTxt(c.nome)] = c; });
@@ -1382,33 +1439,9 @@ function casarOrigens(base) {
       /* Só tenta parecer com campanha o que tem cara de campanha: etiqueta
          entre colchetes ou nome de produto. "Orgânico" e "Indicação" não são
          campanha e não devem ser forçados. */
-      const to = new Set(tokens(origem)), eo = etiquetas(origem);
-      let melhor = null, nota = 0;
-      for (const c of lista) {
-        const tc = new Set(tokens(c.nome)), ec = etiquetas(c.nome);
-        const comuns = [...to].filter(t => tc.has(t)).length;
-        const jac = comuns / Math.max(1, new Set([...to, ...tc]).size);
-        const etiqOk = eo.length && ec.length ? eo.filter(e => ec.includes(e)).length / Math.max(eo.length, ec.length) : 0;
-        /* Canal diferente ([FORM] × [WPP] × [LINK-WPP]) é campanha diferente,
-           por mais que o produto seja o mesmo. Creditar honorários à campanha
-           errada é pior do que deixar sem casar — sem casar aparece no aviso
-           e vai para a aba Mapeamento. */
-        const canal = arr => arr.map(e => e.replace(/[\[\]]/g, '')).find(e => /^(form|wpp|link-wpp|msg|site)$/.test(e)) || '';
-        const conflito = canal(eo) && canal(ec) && canal(eo) !== canal(ec) ? 0.2 : 0;
-        /* Produto diferente também é campanha diferente: "Isenção de IR" não
-           pode casar com "Rev. Plano de Saúde" só porque as duas têm [ENG]
-           [FORM]. */
-        const produtoDe = t => { const x = normTxt(t);
-          return /plano de saude|saude/.test(x) ? 'saude' : /financiamento/.test(x) ? 'financiamento'
-            : /isencao|imposto de renda|ir/.test(x) ? 'ir' : /abins|cbd/.test(x) ? 'abins' : /itiv/.test(x) ? 'itiv'
-            : /aereo/.test(x) ? 'aereo' : /procedimento|negativa/.test(x) ? 'procedimento' : /bancari/.test(x) ? 'bancario' : ''; };
-        const po = produtoDe(origem), pc = produtoDe(c.nome);
-        const conflitoProduto = po && pc && po !== pc ? 0.4 : 0;
-        const n = jac * 0.6 + etiqOk * 0.4 - conflito - conflitoProduto;
-        if (n > nota) { nota = n; melhor = c; }
-      }
-      if (melhor && nota >= 0.6 && (eo.length || /rev\.|revisional|abins|itiv|plano|financiamento/i.test(origem))) {
-        campanha = melhor; como = 'por semelhança (' + Math.round(nota * 100) + '%)';
+      const m = melhorPorSemelhanca(origem, lista);
+      if (m.campanha && m.nota >= 0.6 && (m.etiquetas.length || /rev\.|revisional|abins|itiv|plano|financiamento/i.test(origem))) {
+        campanha = m.campanha; como = 'por semelhança (' + Math.round(m.nota * 100) + '%)';
       } else if (RE_META_GENERICO.test(o)) {
         campanha = CAMPANHA_GENERICA; como = 'Meta, sem campanha identificada';
       }
@@ -1418,6 +1451,24 @@ function casarOrigens(base) {
   return mapa;
 }
 
+/* O Kommo grava no lead o NOME EXATO da campanha do Meta, então quase tudo
+   casa por nome idêntico; a semelhança só entra quando a campanha foi
+   renomeada depois que o lead chegou. */
+function casarCampanhasKommo(base) {
+  const nomes = {};
+  Object.values(base.campanhas).forEach(c => { nomes[normTxt(c.nome)] = c; });
+  const lista = Object.values(base.campanhas);
+  const mapa = {};
+  [...new Set(base.reunioes.map(r => r.campanha).filter(Boolean))].forEach(nome => {
+    const n = normTxt(nome);
+    if (nomes[n]) { mapa[nome] = { nome, campanha: nomes[n], como: 'nome idêntico' }; return; }
+    const m = melhorPorSemelhanca(nome, lista);
+    mapa[nome] = m.campanha && m.nota >= 0.6
+      ? { nome, campanha: m.campanha, como: 'por semelhança (' + Math.round(m.nota * 100) + '%)' }
+      : { nome, campanha: null, como: 'sem campanha no Meta' };
+  });
+  return mapa;
+}
 /* ------------------------------------------------------------- período */
 function periodoAtual() {
   const hoje = hojeZerado();
@@ -1431,6 +1482,7 @@ function periodoAtual() {
     let ini = null;
     (DADOS ? DADOS.insights : []).forEach(r => { if (!ini || r.data < ini) ini = r.data; });
     (DADOS ? DADOS.fluxo : []).forEach(f => { if (f.fechamento && (!ini || f.fechamento < ini)) ini = f.fechamento; });
+    (DADOS ? DADOS.reunioes : []).forEach(r => { if (!ini || r.data < ini) ini = r.data; });
     return { ini: ini || new Date(2025, 0, 1), fim: hoje, rotulo: 'todo o período' };
   }
   if (p === 'mesSel' && FILTRO.ini) { const i = FILTRO.ini; const f = new Date(i.getFullYear(), i.getMonth() + 1, 0);
@@ -1450,7 +1502,8 @@ function analisar(base) {
   const porCamp = {};
   const garantir = c => porCamp[c.id] || (porCamp[c.id] = {
     campanha: c, gasto: 0, leads: 0, leadsForm: 0, conversas: 0, leadsPixel: 0, impressoes: 0,
-    cliquesLink: 0, dias: 0, clientes: 0, retorno: 0, entrada: 0, fechamentos: [] });
+    cliquesLink: 0, dias: 0, clientes: 0, retorno: 0, entrada: 0, fechamentos: [],
+    reunioes: 0, reunioesLista: [] });
 
   base.insights.filter(r => daConta(r) && noPeriodo(r.data, per)).forEach(r => {
     const a = garantir(base.campanhas[r.id]);
@@ -1474,22 +1527,39 @@ function analisar(base) {
     } else semCampanha.push(f);
   });
 
+  /* Reuniões marcadas no período, pela DATA EM QUE O LEAD ENTROU na etapa
+     "Enviado ao ADVBOX" — do mesmo jeito que o cliente conta pela data do
+     fechamento, ainda que o lead tenha chegado meses antes. */
+  const reunioesPeriodo = base.reunioes.filter(r => noPeriodo(r.data, per));
+  const semReuniao = [];
+  reunioesPeriodo.forEach(r => {
+    const m = r.campanha ? base.mapaReuniao[r.campanha] : null;
+    const camp = m && m.campanha;
+    if (camp && (FILTRO.conta === 'todas' || camp === CAMPANHA_GENERICA || String(camp.conta) === FILTRO.conta)) {
+      const a = garantir(camp);
+      a.reunioes++; a.reunioesLista.push(r);
+    } else semReuniao.push(r);
+  });
+
   const linhas = Object.values(porCamp).map(a => {
     const c = a.campanha;
     a.orcDiario = c.orcDiario; a.orcMensal = c.orcVitalicio && !c.orcDiario ? c.orcVitalicio : c.orcDiario * diasDoMes;
     a.cpl = divisao(a.gasto, a.leads); a.conversao = divisao(a.clientes, a.leads);
     a.cac = divisao(a.gasto, a.clientes); a.roi = divisao(a.retorno, a.gasto);
+    a.convReuniao = divisao(a.reunioes, a.leads); a.custoReuniao = divisao(a.gasto, a.reunioes);
     return a;
   }).sort((x, y) => y.gasto - x.gasto);
 
   const tot = linhas.reduce((t, a) => {
     t.gasto += a.gasto; t.leads += a.leads; t.clientes += a.clientes; t.retorno += a.retorno; t.entrada += a.entrada;
+    t.reunioes += a.reunioes;
     t.orcDiario += a.campanha.status === 'ACTIVE' ? a.orcDiario : 0;
     t.orcMensal += a.campanha.status === 'ACTIVE' ? a.orcMensal : 0;
     return t;
-  }, { gasto: 0, leads: 0, clientes: 0, retorno: 0, entrada: 0, orcDiario: 0, orcMensal: 0 });
+  }, { gasto: 0, leads: 0, clientes: 0, retorno: 0, entrada: 0, orcDiario: 0, orcMensal: 0, reunioes: 0 });
   tot.cpl = divisao(tot.gasto, tot.leads); tot.conversao = divisao(tot.clientes, tot.leads);
   tot.cac = divisao(tot.gasto, tot.clientes); tot.roi = divisao(tot.retorno, tot.gasto);
+  tot.convReuniao = divisao(tot.reunioes, tot.leads); tot.custoReuniao = divisao(tot.gasto, tot.reunioes);
 
   /* Série diária do período (todas as campanhas do recorte). */
   const porDia = {};
@@ -1520,7 +1590,8 @@ function analisar(base) {
   const grave = faltando.length >= 3 || (faltando.length > 0 && chaveDia(faltando[0]) === chaveDia(per.ini));
   const cobertura = { faltando, grave, gastoMetaMes, ehMesAtual: FILTRO.periodo === 'mes' };
 
-  return { per, linhas, tot, fechamentos, semCampanha, serie, ultimaData, diasDoMes, cobertura };
+  return { per, linhas, tot, fechamentos, semCampanha, serie, ultimaData, diasDoMes, cobertura,
+           reunioesPeriodo, semReuniao };
 }
 
 /* ================================================================ RENDER */
@@ -1708,6 +1779,8 @@ function renderResultados(base, a) {
     l => l.gasto,
     l => l.leads,
     l => l.cpl,
+    l => l.reunioes,
+    l => l.convReuniao,
     l => l.clientes,
     l => l.retorno || null,
     l => l.conversao,
@@ -1723,16 +1796,21 @@ function renderResultados(base, a) {
     '<td><b>' + moeda(l.gasto) + '</b></td>' +
     '<td>' + num(l.leads) + '</td>' +
     '<td>' + (l.cpl === null ? '—' : moeda(l.cpl)) + '</td>' +
+    '<td>' + (l.reunioes ? '<b>' + num(l.reunioes) + '</b>' : '—') + '</td>' +
+    '<td>' + pctTxt(l.convReuniao === null ? null : l.convReuniao * 100) + '</td>' +
     '<td>' + num(l.clientes) + '</td>' +
     '<td>' + (l.retorno ? '<b>' + moeda(l.retorno) + '</b>' : '—') + '</td>' +
     '<td>' + pctTxt(l.conversao === null ? null : l.conversao * 100) + '</td>' +
     '<td>' + (l.cac === null ? '—' : moeda(l.cac)) + '</td>' +
     '<td>' + roiTag(l.roi) + '</td></tr>'
-  ).join('') || '<tr><td colspan="12">Nenhuma campanha com dados no período.</td></tr>';
+  ).join('') || '<tr><td colspan="14">Nenhuma campanha com dados no período.</td></tr>';
   document.getElementById('rodapeCampanhas').innerHTML = ord.length ?
     '<tr><td><b>Total</b></td><td></td><td>' + moeda(tot.orcDiario) + '</td><td>' + moeda(tot.orcMensal) + '</td>' +
     '<td><b>' + moeda(tot.gasto) + '</b></td><td><b>' + num(tot.leads) + '</b></td>' +
-    '<td>' + (tot.cpl === null ? '—' : moeda(tot.cpl)) + '</td><td><b>' + num(tot.clientes) + '</b></td>' +
+    '<td>' + (tot.cpl === null ? '—' : moeda(tot.cpl)) + '</td>' +
+    '<td><b>' + num(tot.reunioes) + '</b></td>' +
+    '<td>' + pctTxt(tot.convReuniao === null ? null : tot.convReuniao * 100) + '</td>' +
+    '<td><b>' + num(tot.clientes) + '</b></td>' +
     '<td><b>' + moeda(tot.retorno) + '</b></td><td>' + pctTxt(tot.conversao === null ? null : tot.conversao * 100) + '</td>' +
     '<td>' + (tot.cac === null ? '—' : moeda(tot.cac)) + '</td><td>' + roiTag(tot.roi) + '</td></tr>' : '';
   tabelaClicavel('corpoCampanhas', ord, l => fichaCampanha(l, base, a));
@@ -1808,7 +1886,8 @@ function fichaCampanha(l, base, a) {
   const dias = base.insights.filter(r => r.id === l.campanha.id && noPeriodo(r.data, a.per)).sort((x, y) => y.data - x.data);
   abrirLista({
     titulo: l.campanha.nome,
-    sub: 'Dia a dia no período · ' + moeda(l.gasto) + ' · ' + num(l.leads) + ' leads · ' + num(l.clientes) + ' cliente(s)',
+    sub: 'Dia a dia no período · ' + moeda(l.gasto) + ' · ' + num(l.leads) + ' leads · ' +
+      num(l.reunioes) + ' reunião(ões) · ' + num(l.clientes) + ' cliente(s)',
     colunas: [
       { r: 'Dia', chave: 'data', formata: v => fmtData(v) },
       { r: 'Gasto', chave: 'gasto', alinha: 'dir', formata: v => moeda(v) },
@@ -1822,8 +1901,17 @@ function fichaCampanha(l, base, a) {
       ? '<b>' + l.fechamentos.length + '</b> fechamento(s) no período, <b>' + moeda(l.retorno) + '</b> de honorários: ' +
         esc(l.fechamentos.map(f => f.cliente).slice(0, 6).join(', ')) + (l.fechamentos.length > 6 ? '…' : '')
       : 'Nenhum fechamento ligado a esta campanha no período.',
-    notas: [{ tipo: '', html: 'Orçamento diário <b>' + moeda(l.orcDiario) + '</b> (' + esc(l.campanha.origemOrc || '—') +
-      ') · objetivo ' + esc(l.campanha.objetivo || '—') + ' · status ' + esc(l.campanha.status || '—') }]
+    notas: [
+      { tipo: '', html: l.reunioes
+        ? '<b>' + num(l.reunioes) + '</b> reunião(ões) marcada(s) no período (Kommo, etapa <i>Enviado ao ADVBOX</i>)' +
+          (l.convReuniao === null ? '' : ' — <b>' + pctTxt(l.convReuniao * 100) + '</b> dos leads') +
+          (l.custoReuniao === null ? '' : ' · <b>' + moeda(l.custoReuniao) + '</b> por reunião') + ':<br>' +
+          esc(l.reunioesLista.slice().sort((x, y) => y.data - x.data).slice(0, 12)
+            .map(r => r.lead + ' (' + fmtData(r.data) + ')').join(' · ')) +
+          (l.reunioesLista.length > 12 ? '…' : '')
+        : 'Nenhuma reunião marcada no Kommo ligada a esta campanha no período.' },
+      { tipo: '', html: 'Orçamento diário <b>' + moeda(l.orcDiario) + '</b> (' + esc(l.campanha.origemOrc || '—') +
+        ') · objetivo ' + esc(l.campanha.objetivo || '—') + ' · status ' + esc(l.campanha.status || '—') }]
   });
 }
 
@@ -1869,6 +1957,19 @@ function renderObsResultados(base, a) {
   if (naoCasadas.length) obs.push(obsCard('atencao', '&#128279;', 'Origens com cara de campanha sem casamento',
     naoCasadas.map(m => '<b>' + esc(m.origem) + '</b>').join(' · ') +
     ' — os fechamentos dessas origens não entram em nenhuma campanha. Preencha a aba <b>Mapeamento</b> na planilha.'));
+  if (!base.reunioes.length) obs.push(obsCard('info', '&#128197;', 'Reuniões ainda não vieram do Kommo',
+    'A aba <b>Reuniões</b> da planilha está vazia ou não existe, então a coluna <b>Reuniões</b> fica zerada. ' +
+    'No Apps Script: <b>KOMMO_TOKEN</b> nas Propriedades do script e depois <b>BM · Meta Ads → Reuniões do Kommo (histórico)</b>.'));
+  else if (a.semReuniao.length) {
+    const semCampo = a.semReuniao.filter(r => !r.campanha).length;
+    const naoCasou = [...new Set(a.semReuniao.filter(r => r.campanha).map(r => r.campanha))];
+    obs.push(obsCard('atencao', '&#128269;', num(a.semReuniao.length) + ' reunião(ões) fora das campanhas',
+      (semCampo ? '<b>' + num(semCampo) + '</b> sem o campo <b>Campanha</b> preenchido no lead (entrada manual, indicação ou ' +
+        'anúncio antigo que não gravava o campo). ' : '') +
+      (naoCasou.length ? 'Campanha no Kommo sem correspondente no Meta: ' + naoCasou.map(n => '<b>' + esc(n) + '</b>').join(' · ') + '. ' : '') +
+      'Como não dá para dizer de qual campanha vieram — e parte delas nem é do Meta (indicação, orgânico) — ' +
+      'ficam de fora da tabela e do total.'));
+  }
   if (tot.roi !== null && tot.roi >= 3) obs.push(obsCard('bom', '&#10004;', 'Retorno consistente no período',
     'Cada R$ 1 investido voltou como <b>' + multTxt(tot.roi) + '</b> em honorários iniciais, com CAC de <b>' + moeda(tot.cac) + '</b>.'));
   document.getElementById('obsResultados').innerHTML = obs.join('') || '<div class="obs-vazio">Nenhum ponto de atenção no período.</div>';
