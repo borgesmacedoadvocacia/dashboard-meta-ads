@@ -437,6 +437,24 @@ function definirInicio2026() {
   alertar_('Pronto: histórico desde 01/01/2026 e incremental de 35 dias. Agora execute sincronizarCompleta.');
 }
 
+/** Passa a medir as DUAS contas (BM Advocacia + Gabriel Borges Macedo) e
+    busca o historico so da conta que ainda nao esta na planilha, sem refazer
+    a que ja foi carregada. Depois disso a incremental de hora em hora cobre
+    as duas sozinha. */
+function usarAsDuasContas() {
+  gravarConfig_('META_AD_ACCOUNTS', '106339469723880,731383791781450');
+  /* Sem o flush a leitura logo abaixo ainda ve a lista antiga (as escritas
+     ficam em lote ate o fim da execucao) e o cursor cairia na conta errada. */
+  SpreadsheetApp.flush();
+  var contas = contas_();
+  if (contas.length !== 2) throw new Error('A aba _Config não ficou com as duas contas: ' + JSON.stringify(contas));
+  props_().setProperty('cursor', JSON.stringify({ conta: contas.length - 1, mes: cfg_('DATA_INICIO').slice(0, 7), gravadas: 0 }));
+  limparGatilhosContinuacao_();
+  gravarSync_({ status: 'rodando', etapa: 'completa', progresso: 0,
+                mensagem: 'Iniciando histórico da conta ' + contas[contas.length - 1] + '…' });
+  continuarSincronizacao();
+}
+
 function gravarConfig_(chave, valor) {
   var ss = planilha_();
   var aba = garantirAba_(ss, ABA.config, CAB.config);
@@ -444,10 +462,14 @@ function gravarConfig_(chave, valor) {
   if (ult > 1) {
     var v = aba.getRange(2, 1, ult - 1, 1).getValues();
     for (var i = 0; i < v.length; i++) {
-      if (String(v[i][0]) === chave) { aba.getRange(i + 2, 2).setValue(valor); return; }
+      /* Formato texto antes de gravar: no locale pt-BR a planilha leria
+         "106339469723880,731383791781450" como um numero decimal. */
+      if (String(v[i][0]) === chave) { aba.getRange(i + 2, 2).setNumberFormat('@').setValue(valor); return; }
     }
   }
-  aba.getRange(aba.getLastRow() + 1, 1, 1, 3).setValues([[chave, valor, DESCRICAO_CONFIG[chave] || '']]);
+  var lin = aba.getLastRow() + 1;
+  aba.getRange(lin, 2).setNumberFormat('@');
+  aba.getRange(lin, 1, 1, 3).setValues([[chave, valor, DESCRICAO_CONFIG[chave] || '']]);
 }
 
 /* ============================================================== TOKEN */
