@@ -58,8 +58,9 @@ do script → `META_ACCESS_TOKEN`*. O do Kommo, idem, em `KOMMO_TOKEN`.
 
 **Resultados das campanhas** — por período (mês atual por padrão; últimos 30 dias, últimos
 3 meses, este ano, todo o período, mês escolhido ou período livre): nome, orçamento diário e mensal, gasto,
-leads, custo por lead, **reuniões marcadas e conversão lead → reunião**, clientes, retorno financeiro,
-conversão lead → cliente, CAC e ROI.
+leads, custo por lead, **reuniões marcadas, conversão lead → reunião e custo por reunião**, clientes,
+retorno financeiro, conversão lead → cliente, CAC e ROI. O filtro **Campanhas: só as ativas** corta
+antes do total, dos cartões e dos gráficos — não só da tabela — e o recorte diz quantas ficaram de fora.
 Retorno = **honorários iniciais** dos fechamentos com **pagamento confirmado**, pela **data do
 fechamento**, cujo campo ORIGEM casa com a campanha. Fórmulas: CPL = gasto ÷ leads ·
 Conversão = clientes ÷ leads · CAC = gasto ÷ clientes · ROI = retorno ÷ gasto.

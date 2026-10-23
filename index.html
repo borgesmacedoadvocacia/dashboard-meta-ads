@@ -452,6 +452,16 @@
   .filtro-campo .campo-texto { width:auto; min-width:120px; padding:.35rem .5rem; font-size:.8rem; }
   .pagina.oculto { display:none; }
   .tabela-wrap tfoot td { font-weight:700; border-top:1px solid var(--borda); }
+
+  /* Campanha a campanha tem 15 colunas: fonte e respiro menores para caber
+     na tela sem rolagem lateral. O cabeçalho pode quebrar em duas linhas —
+     é o que economiza a largura das colunas de dinheiro. */
+  #tabelaCampanhas { font-size:.76rem; min-width:0; }
+  #tabelaCampanhas thead th { padding:.45rem .35rem; font-size:.59rem; letter-spacing:.02em; white-space:normal; }
+  #tabelaCampanhas tbody td, #tabelaCampanhas tfoot td { padding:.45rem .35rem; }
+  #tabelaCampanhas td:first-child { max-width:190px; line-height:1.25; }
+  #tabelaCampanhas .tag-pct { padding:.12rem .3rem; font-size:.68rem; }
+  @media (max-width:1180px) { #tabelaCampanhas { min-width:1060px; } }
   @media (max-width:760px) { .abas-nota { margin-left:0; width:100%; } .filtro-rotulo { min-width:100%; padding-top:0; } }
 
 </style>
@@ -543,6 +553,13 @@
         <span class="filtro-rotulo">Conta</span>
         <div class="filtros" id="filtrosConta"></div>
       </div>
+      <div class="filtro-linha">
+        <span class="filtro-rotulo">Campanhas</span>
+        <div class="filtros" id="filtrosStatus">
+          <button type="button" class="chip ativo" data-status="todas">Todas</button>
+          <button type="button" class="chip" data-status="ativas">Só as ativas</button>
+        </div>
+      </div>
       <div class="secao-sub" id="subPeriodo">&mdash;</div>
     </section>
 
@@ -557,17 +574,17 @@
     <section class="secao">
       <div class="secao-titulo">Campanha a campanha</div>
       <div class="secao-sub">CPL = gasto ÷ leads · <b>Reuniões</b> = leads que entraram na etapa <b>Enviado ao ADVBOX</b> do Kommo no período, pela data em que
-        foram movidos · <b>Conv. reunião</b> = reuniões ÷ leads · Conversão = clientes ÷ leads · CAC = gasto ÷ clientes ·
-        ROI = retorno ÷ gasto (quanto voltou por R$ 1). Orçamento mensal = orçamento diário × dias do mês corrente.<br>
+        foram movidos · <b>Conv. reun.</b> = reuniões ÷ leads · <b>Custo/reun.</b> = gasto ÷ reuniões · Conv. cliente = clientes ÷ leads ·
+        CAC = gasto ÷ clientes · ROI = retorno ÷ gasto (quanto voltou por R$ 1). Orç./mês = orçamento diário × dias do mês corrente.<br>
         <b>Clique no título de uma coluna para ordenar</b> — clicar de novo inverte. Linha sem valor fica sempre no fim.
         A ordem escolhida continua valendo na próxima visita; o total e os gráficos não mudam com ela.</div>
       <div class="card">
         <div class="tabela-wrap">
           <table id="tabelaCampanhas">
             <thead><tr>
-              <th>Campanha</th><th>Status</th><th>Orç. diário</th><th>Orç. mensal</th><th>Gasto</th>
-              <th>Leads</th><th>CPL</th><th>Reuniões</th><th>Conv. reunião</th>
-              <th>Clientes</th><th>Retorno</th><th>Conversão</th><th>CAC</th><th>ROI</th>
+              <th>Campanha</th><th>Status</th><th>Orç./dia</th><th>Orç./mês</th><th>Gasto</th>
+              <th>Leads</th><th>CPL</th><th>Reuniões</th><th>Conv. reun.</th><th>Custo/reun.</th>
+              <th>Clientes</th><th>Retorno</th><th>Conv. cliente</th><th>CAC</th><th>ROI</th>
             </tr></thead>
             <tbody id="corpoCampanhas"></tbody>
             <tfoot id="rodapeCampanhas"></tfoot>
@@ -1172,7 +1189,7 @@ const ABA_FLUXO = 'DADOS';
 const LS_WEBAPP = 'bm_metaads_webapp';
 const LS_TOKEN  = 'bm_metaads_token';
 
-const FILTRO = { periodo: 'mes', ini: null, fim: null, conta: 'todas', janela: '30d', busca: '' };
+const FILTRO = { periodo: 'mes', ini: null, fim: null, conta: 'todas', janela: '30d', busca: '', status: 'todas' };
 let PAGINA = 'resultados';
 
 const aspas = n => "'" + String(n).replace(/'/g, "''") + "'";
@@ -1541,14 +1558,25 @@ function analisar(base) {
     } else semReuniao.push(r);
   });
 
-  const linhas = Object.values(porCamp).map(a => {
+  let linhas = Object.values(porCamp).map(a => {
     const c = a.campanha;
     a.orcDiario = c.orcDiario; a.orcMensal = c.orcVitalicio && !c.orcDiario ? c.orcVitalicio : c.orcDiario * diasDoMes;
     a.cpl = divisao(a.gasto, a.leads); a.conversao = divisao(a.clientes, a.leads);
     a.cac = divisao(a.gasto, a.clientes); a.roi = divisao(a.retorno, a.gasto);
-    a.convReuniao = divisao(a.reunioes, a.leads); a.custoReuniao = divisao(a.gasto, a.reunioes);
+    a.convReuniao = divisao(a.reunioes, a.leads);
+    /* Sem gasto no período não há custo por reunião: "R$ 0,00" numa campanha
+       pausada que ainda colhe reunião antiga se lê como reunião de graça. */
+    a.custoReuniao = a.gasto ? divisao(a.gasto, a.reunioes) : null;
     return a;
   }).sort((x, y) => y.gasto - x.gasto);
+
+  /* "Só as ativas" corta antes do total e dos gráficos, não só da tabela:
+     total que soma linha escondida é pior do que filtro nenhum. Quantas
+     ficaram de fora vai no rótulo do recorte, para ninguém ler o total como
+     se fosse tudo. */
+  const ocultadas = FILTRO.status === 'ativas'
+    ? linhas.filter(a => a.campanha.status !== 'ACTIVE') : [];
+  if (ocultadas.length) linhas = linhas.filter(a => a.campanha.status === 'ACTIVE');
 
   const tot = linhas.reduce((t, a) => {
     t.gasto += a.gasto; t.leads += a.leads; t.clientes += a.clientes; t.retorno += a.retorno; t.entrada += a.entrada;
@@ -1559,7 +1587,8 @@ function analisar(base) {
   }, { gasto: 0, leads: 0, clientes: 0, retorno: 0, entrada: 0, orcDiario: 0, orcMensal: 0, reunioes: 0 });
   tot.cpl = divisao(tot.gasto, tot.leads); tot.conversao = divisao(tot.clientes, tot.leads);
   tot.cac = divisao(tot.gasto, tot.clientes); tot.roi = divisao(tot.retorno, tot.gasto);
-  tot.convReuniao = divisao(tot.reunioes, tot.leads); tot.custoReuniao = divisao(tot.gasto, tot.reunioes);
+  tot.convReuniao = divisao(tot.reunioes, tot.leads);
+  tot.custoReuniao = tot.gasto ? divisao(tot.gasto, tot.reunioes) : null;
 
   /* Série diária do período (todas as campanhas do recorte). */
   const porDia = {};
@@ -1591,7 +1620,7 @@ function analisar(base) {
   const cobertura = { faltando, grave, gastoMetaMes, ehMesAtual: FILTRO.periodo === 'mes' };
 
   return { per, linhas, tot, fechamentos, semCampanha, serie, ultimaData, diasDoMes, cobertura,
-           reunioesPeriodo, semReuniao };
+           reunioesPeriodo, semReuniao, ocultadas };
 }
 
 /* ================================================================ RENDER */
@@ -1649,6 +1678,12 @@ function montarControles(base) {
       if (DADOS) render(DADOS);
     });
   }
+  const boxStatus = document.getElementById('filtrosStatus');
+  boxStatus.addEventListener('click', ev => {
+    const b = ev.target.closest('.chip'); if (!b) return;
+    FILTRO.status = b.dataset.status; marcarChip(boxStatus, b);
+    if (DADOS) render(DADOS);
+  });
   document.getElementById('filtrosJanela').addEventListener('click', ev => {
     const b = ev.target.closest('.chip'); if (!b) return;
     FILTRO.janela = b.dataset.janela; marcarChip(document.getElementById('filtrosJanela'), b);
@@ -1726,7 +1761,11 @@ function renderResultados(base, a) {
   document.getElementById('subPeriodo').innerHTML =
     'Recorte: <b>' + esc(per.rotulo) + '</b> — ' + fmtData(per.ini) + ' a ' + fmtData(per.fim) +
     (a.ultimaData ? ' · último dia com dados do Meta: <b>' + fmtData(a.ultimaData) + '</b>' : ' · <b>sem dados do Meta ainda</b>') +
-    (FILTRO.conta !== 'todas' ? ' · conta <b>' + esc(FILTRO.conta) + '</b>' : '');
+    (FILTRO.conta !== 'todas' ? ' · conta <b>' + esc(FILTRO.conta) + '</b>' : '') +
+    (FILTRO.status === 'ativas'
+      ? ' · <b>só campanhas ativas</b>' + (a.ocultadas.length ? ' (' + num(a.ocultadas.length) + ' fora' : ' (') +
+        ', cartões e total também)'
+      : '');
 
   const corRoi = tot.roi === null ? 'azul' : tot.roi >= 3 ? 'verde' : tot.roi >= 1 ? 'amarelo' : 'vermelho';
   const cob = a.cobertura;
@@ -1781,6 +1820,7 @@ function renderResultados(base, a) {
     l => l.cpl,
     l => l.reunioes,
     l => l.convReuniao,
+    l => l.custoReuniao,
     l => l.clientes,
     l => l.retorno || null,
     l => l.conversao,
@@ -1798,18 +1838,20 @@ function renderResultados(base, a) {
     '<td>' + (l.cpl === null ? '—' : moeda(l.cpl)) + '</td>' +
     '<td>' + (l.reunioes ? '<b>' + num(l.reunioes) + '</b>' : '—') + '</td>' +
     '<td>' + pctTxt(l.convReuniao === null ? null : l.convReuniao * 100) + '</td>' +
+    '<td>' + (l.custoReuniao === null ? '—' : moeda(l.custoReuniao)) + '</td>' +
     '<td>' + num(l.clientes) + '</td>' +
     '<td>' + (l.retorno ? '<b>' + moeda(l.retorno) + '</b>' : '—') + '</td>' +
     '<td>' + pctTxt(l.conversao === null ? null : l.conversao * 100) + '</td>' +
     '<td>' + (l.cac === null ? '—' : moeda(l.cac)) + '</td>' +
     '<td>' + roiTag(l.roi) + '</td></tr>'
-  ).join('') || '<tr><td colspan="14">Nenhuma campanha com dados no período.</td></tr>';
+  ).join('') || '<tr><td colspan="15">Nenhuma campanha com dados no período.</td></tr>';
   document.getElementById('rodapeCampanhas').innerHTML = ord.length ?
     '<tr><td><b>Total</b></td><td></td><td>' + moeda(tot.orcDiario) + '</td><td>' + moeda(tot.orcMensal) + '</td>' +
     '<td><b>' + moeda(tot.gasto) + '</b></td><td><b>' + num(tot.leads) + '</b></td>' +
     '<td>' + (tot.cpl === null ? '—' : moeda(tot.cpl)) + '</td>' +
     '<td><b>' + num(tot.reunioes) + '</b></td>' +
     '<td>' + pctTxt(tot.convReuniao === null ? null : tot.convReuniao * 100) + '</td>' +
+    '<td>' + (tot.custoReuniao === null ? '—' : moeda(tot.custoReuniao)) + '</td>' +
     '<td><b>' + num(tot.clientes) + '</b></td>' +
     '<td><b>' + moeda(tot.retorno) + '</b></td><td>' + pctTxt(tot.conversao === null ? null : tot.conversao * 100) + '</td>' +
     '<td>' + (tot.cac === null ? '—' : moeda(tot.cac)) + '</td><td>' + roiTag(tot.roi) + '</td></tr>' : '';
