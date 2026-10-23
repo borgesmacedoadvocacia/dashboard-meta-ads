@@ -40,9 +40,11 @@ var KOMMO_DESCRICAO = {
   KOMMO_CAMPO_CAMPANHA: 'Campo personalizado do lead que traz o nome da campanha do Meta.'
 };
 
-/* Lote de leads por chamada. 100 deixa a URL em ~1,5 KB — longe do limite —
-   e cobre o histórico inteiro (≈1.000 leads) em 10 chamadas. */
-var KOMMO_LOTE = 100;
+/* Lote de leads por chamada. O UrlFetchApp corta a URL em 2 KB e cada id
+   custa ~30 caracteres já codificado (filter%5Bid%5D%5B%5D=29245944&), então
+   100 estourava o limite: 40 deixa a URL em ~1,3 KB e cobre o histórico
+   inteiro (≈1.050 leads) em 27 chamadas. */
+var KOMMO_LOTE = 40;
 
 /* ============================================================ COMANDOS */
 
