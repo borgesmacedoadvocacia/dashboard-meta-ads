@@ -40,6 +40,14 @@ Retorno = **honorários iniciais** dos fechamentos com **pagamento confirmado**,
 fechamento**, cujo campo ORIGEM casa com a campanha. Fórmulas: CPL = gasto ÷ leads ·
 Conversão = clientes ÷ leads · CAC = gasto ÷ clientes · ROI = retorno ÷ gasto.
 
+**Ordenação.** Toda coluna das tabelas de campanhas, de mídia, de anúncios e de mapeamento
+ordena: clique no título, clique de novo para inverter. Número começa do maior, texto começa
+do A, e linha sem valor (`—`) fica sempre no fim, nos dois sentidos. A coluna escolhida é
+guardada no navegador, por tabela, e sobrevive à atualização automática. O total do rodapé,
+os cartões e os gráficos não dependem da ordem — o gráfico "gasto × retorno" continua
+mostrando as 8 que mais gastam. Nos anúncios a ordenação vem **antes** do corte em 200
+linhas: ordenar por CPL traz os 200 daquele CPL, não os 200 que mais gastam.
+
 **Visão do gestor de tráfego** — por janela fechada: entrega do orçamento, CPM, CTR do link,
 página vista ÷ clique, CPL, frequência e alcance por campanha; anúncio a anúncio com
 diagnóstico; e indicações geradas por regras (fadiga de criativo, CTR baixo, CPM subindo,

@@ -149,6 +149,11 @@
     position: sticky; top: 0;
   }
   thead th:first-child { text-align: left; }
+  thead th.ordenavel { cursor: pointer; user-select: none; }
+  thead th.ordenavel:hover { color: var(--texto); }
+  thead th.ordenavel::after { content: '\2195'; margin-left: .3rem; opacity: .3; font-size: .78rem; }
+  thead th.ordenado { color: var(--azul-claro); }
+  thead th.ordenado::after { content: attr(data-seta); opacity: 1; }
   tbody td { padding: 0.55rem 0.7rem; text-align: right; border-bottom: 1px solid rgba(30,45,74,0.5); white-space: nowrap; }
   tbody td:first-child { text-align: left; white-space: normal; }
   tbody tr.destaque { background: rgba(255,255,255,0.04); }
@@ -552,7 +557,9 @@
     <section class="secao">
       <div class="secao-titulo">Campanha a campanha</div>
       <div class="secao-sub">CPL = gasto ÷ leads · Conversão = clientes ÷ leads · CAC = gasto ÷ clientes · ROI = retorno ÷ gasto (quanto voltou por R$ 1).
-        Orçamento mensal = orçamento diário × dias do mês corrente.</div>
+        Orçamento mensal = orçamento diário × dias do mês corrente.<br>
+        <b>Clique no título de uma coluna para ordenar</b> — clicar de novo inverte. Linha sem valor fica sempre no fim.
+        A ordem escolhida continua valendo na próxima visita; o total e os gráficos não mudam com ela.</div>
       <div class="card">
         <div class="tabela-wrap">
           <table id="tabelaCampanhas">
@@ -650,8 +657,8 @@
 
     <section class="secao">
       <div class="secao-titulo">Anúncios — qual criativo está ganhando</div>
-      <div class="secao-sub">Um anúncio por linha, do que mais gasta para o que menos gasta. O diagnóstico combina CTR, frequência e custo por lead
-        do anúncio contra a média da própria campanha.</div>
+      <div class="secao-sub">Um anúncio por linha, do que mais gasta para o que menos gasta — <b>clique no título de uma coluna</b> para ordenar por
+        outra métrica. O diagnóstico combina CTR, frequência e custo por lead do anúncio contra a média da própria campanha.</div>
       <div class="card">
         <div class="filtros" id="filtrosAnuncios"><span id="buscaCampo"></span></div>
         <div class="tabela-wrap">
@@ -960,6 +967,68 @@ function tabelaClicavel(tbodyId, lista, montador) {
 /** Rótulo padrão avisando que a tabela é clicável. */
 function dicaClique(texto) {
   return '<span class="dica-clique">&#128065; ' + (texto || 'clique em uma linha para ver os detalhes') + '</span>';
+}
+
+/* =========================================================================
+   ORDENAÇÃO DAS TABELAS
+   A coluna escolhida fica salva no navegador, por tabela: quem olha por CPL
+   quer continuar vendo por CPL na próxima sincronização, não voltar ao gasto.
+   ========================================================================= */
+const LS_ORDEM = 'meta_ads_ordem';
+const ORDEM = (() => { try { return JSON.parse(localStorage.getItem(LS_ORDEM) || '{}') || {}; } catch (e) { return {}; } })();
+function gravarOrdem() { try { localStorage.setItem(LS_ORDEM, JSON.stringify(ORDEM)); } catch (e) {} }
+
+/** Vazio sempre no fim, nos dois sentidos: "—" no topo só atrapalha a leitura. */
+function cmpOrdem(a, b, desc) {
+  const va = a === null || a === undefined || a === '' || (typeof a === 'number' && !isFinite(a)) ? null : a;
+  const vb = b === null || b === undefined || b === '' || (typeof b === 'number' && !isFinite(b)) ? null : b;
+  if (va === null || vb === null) return va === vb ? 0 : va === null ? 1 : -1;
+  if (typeof va === 'string' || typeof vb === 'string')
+    return (desc ? -1 : 1) * chaveBusca(va).localeCompare(chaveBusca(vb));
+  return desc ? vb - va : va - vb;
+}
+
+/**
+ * Deixa o cabeçalho de uma tabela clicável e devolve a lista na ordem escolhida.
+ * `chaves` traz um extrator por coluna, na ordem dos <th> (null = coluna que
+ * não ordena); `padrao` é a ordem de partida, enquanto ninguém clicou — e
+ * `null` quer dizer "deixa como já veio" (ordem composta de quem chamou).
+ * `rerender` é chamado no clique — o painel inteiro se redesenha a cada filtro,
+ * então reaproveitar isso mantém rodapé, gráficos e cliques coerentes.
+ */
+function ordenar(tabelaId, lista, chaves, padrao, rerender) {
+  const tab = document.getElementById(tabelaId);
+  let est = ORDEM[tabelaId];
+  if (!est || !chaves[est.col]) est = padrao || null;
+
+  if (tab) Array.from(tab.querySelectorAll('thead th')).forEach((th, i) => {
+    const chave = chaves[i];
+    th.classList.toggle('ordenavel', !!chave);
+    th.classList.toggle('ordenado', !!chave && !!est && i === est.col);
+    if (!chave) { th.removeAttribute('data-seta'); return; }
+    if (est && i === est.col) th.setAttribute('data-seta', est.desc ? '▼' : '▲');
+    else th.removeAttribute('data-seta');
+    th.title = 'Clique para ordenar por ' + th.textContent.trim();
+    if (th.dataset.ligado) return;
+    th.dataset.ligado = '1';
+    /* Primeiro clique: número começa do maior, texto começa do A — é o que se
+       espera ao clicar em "Gasto" e em "Campanha". */
+    const amostra = lista.map(chave).find(v => v !== null && v !== undefined && v !== '');
+    const descInicial = typeof amostra !== 'string';
+    th.addEventListener('click', () => {
+      const at = ORDEM[tabelaId];
+      ORDEM[tabelaId] = { col: i, desc: at && at.col === i ? !at.desc : descInicial };
+      gravarOrdem();
+      rerender();
+    });
+  });
+
+  if (!est) return lista;
+  const chave = chaves[est.col];
+  return lista
+    .map((x, i) => ({ x, i, v: chave(x) }))
+    .sort((a, b) => cmpOrdem(a.v, b.v, est.desc) || a.i - b.i)
+    .map(o => o.x);
 }
 
 /* =========================================================================
@@ -1572,6 +1641,15 @@ function pintarSync(base) {
 }
 
 /* ---------- página 1 ---------- */
+/** Status da campanha em português — o rótulo que a tabela mostra e pelo qual ela ordena. */
+function rotuloStatus(s) {
+  return s === 'GENÉRICA' ? 'sem campanha'
+    : s === 'ACTIVE' ? 'Ativa'
+    : s === 'PAUSED' || s === 'CAMPAIGN_PAUSED' ? 'Pausada'
+    : s === 'HISTÓRICO' ? 'Histórico'
+    : (s || '—');
+}
+
 function renderResultados(base, a) {
   const { per, linhas, tot } = a;
   document.getElementById('subPeriodo').innerHTML =
@@ -1615,13 +1693,28 @@ function renderResultados(base, a) {
     5: () => listaFechamentos('Retorno financeiro no período', a.fechamentos.filter(f => base.mapa[f.origem] && base.mapa[f.origem].campanha), base)
   });
 
-  const st = s => s === 'GENÉRICA' ? '<span class="tag-pct neutro" title="fechamentos cuja origem diz Meta, mas não qual campanha">sem campanha</span>'
-    : s === 'ACTIVE' ? '<span class="tag-pct verde">Ativa</span>'
-    : s === 'PAUSED' || s === 'CAMPAIGN_PAUSED' ? '<span class="tag-pct amarelo">Pausada</span>'
-    : s === 'HISTÓRICO' ? '<span class="tag-pct neutro">Histórico</span>'
-    : '<span class="tag-pct neutro">' + esc(s || '—') + '</span>';
+  const st = s => s === 'GENÉRICA'
+    ? '<span class="tag-pct neutro" title="fechamentos cuja origem diz Meta, mas não qual campanha">sem campanha</span>'
+    : '<span class="tag-pct ' + (s === 'ACTIVE' ? 'verde' : s === 'PAUSED' || s === 'CAMPAIGN_PAUSED' ? 'amarelo' : 'neutro') +
+      '">' + esc(rotuloStatus(s)) + '</span>';
   const roiTag = v => v === null ? '—' : '<span class="tag-pct ' + (v >= 3 ? 'verde' : v >= 1 ? 'amarelo' : 'vermelho') + '">' + multTxt(v) + '</span>';
-  document.getElementById('corpoCampanhas').innerHTML = linhas.map((l, i) =>
+  /* Ordem da tabela: o padrão é o maior gasto, mas cada coluna ordena. Os
+     cartões, o rodapé de total e os gráficos não dependem da ordem. */
+  const ord = ordenar('tabelaCampanhas', linhas, [
+    l => l.campanha.nome,
+    l => rotuloStatus(l.campanha.status),
+    l => l.orcDiario || null,
+    l => l.orcMensal || null,
+    l => l.gasto,
+    l => l.leads,
+    l => l.cpl,
+    l => l.clientes,
+    l => l.retorno || null,
+    l => l.conversao,
+    l => l.cac,
+    l => l.roi
+  ], { col: 4, desc: true }, () => { if (DADOS) render(DADOS); });
+  document.getElementById('corpoCampanhas').innerHTML = ord.map((l, i) =>
     '<tr data-i="' + i + '"><td><b>' + esc(l.campanha.nome) + '</b><br><span style="color:var(--texto-muted);font-size:.72rem">' +
       esc(l.campanha.objetivo || '') + (l.campanha.origemOrc === 'conjuntos' ? ' · orçamento por conjunto' : '') + '</span></td>' +
     '<td>' + st(l.campanha.status) + '</td>' +
@@ -1636,13 +1729,13 @@ function renderResultados(base, a) {
     '<td>' + (l.cac === null ? '—' : moeda(l.cac)) + '</td>' +
     '<td>' + roiTag(l.roi) + '</td></tr>'
   ).join('') || '<tr><td colspan="12">Nenhuma campanha com dados no período.</td></tr>';
-  document.getElementById('rodapeCampanhas').innerHTML = linhas.length ?
+  document.getElementById('rodapeCampanhas').innerHTML = ord.length ?
     '<tr><td><b>Total</b></td><td></td><td>' + moeda(tot.orcDiario) + '</td><td>' + moeda(tot.orcMensal) + '</td>' +
     '<td><b>' + moeda(tot.gasto) + '</b></td><td><b>' + num(tot.leads) + '</b></td>' +
     '<td>' + (tot.cpl === null ? '—' : moeda(tot.cpl)) + '</td><td><b>' + num(tot.clientes) + '</b></td>' +
     '<td><b>' + moeda(tot.retorno) + '</b></td><td>' + pctTxt(tot.conversao === null ? null : tot.conversao * 100) + '</td>' +
     '<td>' + (tot.cac === null ? '—' : moeda(tot.cac)) + '</td><td>' + roiTag(tot.roi) + '</td></tr>' : '';
-  tabelaClicavel('corpoCampanhas', linhas, l => fichaCampanha(l, base, a));
+  tabelaClicavel('corpoCampanhas', ord, l => fichaCampanha(l, base, a));
 
   /* gráficos */
   destruir('gastoRetorno');
@@ -1681,7 +1774,14 @@ function renderMapeamento(base, a) {
   document.getElementById('subMapeamento').innerHTML =
     '<b>' + num(casadas) + '</b> origem(ns) do Fluxo casam com campanha · <b>' + num(linhas.length - casadas) +
     '</b> não são campanha (orgânico, indicação, recompra…) e ficam fora dos números acima.';
-  document.getElementById('corpoMapeamento').innerHTML = linhas.map(l =>
+  const ord = ordenar('tabelaMapeamento', linhas, [
+    l => l.origem,
+    l => l.campanha ? l.campanha.nome : null,
+    l => l.como,
+    l => l.qtd,
+    l => l.retorno || null
+  ], null, () => { if (DADOS) render(DADOS); });
+  document.getElementById('corpoMapeamento').innerHTML = ord.map(l =>
     '<tr><td><b>' + esc(l.origem) + '</b></td>' +
     '<td>' + (l.campanha ? esc(l.campanha.nome) : '<span style="color:var(--texto-muted)">— fora de campanha</span>') + '</td>' +
     '<td><span class="tag-pct ' + (l.como === 'nome idêntico' || l.como === 'aba Mapeamento' ? 'verde' : l.campanha ? 'amarelo' : 'neutro') + '">' + esc(l.como) + '</span></td>' +
@@ -1825,7 +1925,23 @@ function renderGestor(base) {
     : (a7 / a30 - 1) > 0.25 ? tag('↑ ' + Math.round((a7 / a30 - 1) * 100) + '% pior', 'vermelho')
     : (a7 / a30 - 1) < -0.15 ? tag('↓ ' + Math.round((1 - a7 / a30) * 100) + '% melhor', 'verde')
     : tag('estável', 'neutro');
-  document.getElementById('corpoMidia').innerHTML = linhas.map(l =>
+  const ordM = ordenar('tabelaMidia', linhas, [
+    l => l.nome,
+    l => l.gasto,
+    l => l.entrega,
+    l => l.impressoes,
+    l => l.alcance,
+    l => l.freq,
+    l => l.cpm,
+    l => l.ctrLink,
+    l => l.cpc,
+    l => l.cliquesLink,
+    l => l.lpvRate,
+    l => l.leads,
+    l => l.leads ? l.gasto / l.leads : null,
+    l => l.cpl7 && l.cpl30 ? l.cpl7 / l.cpl30 : null
+  ], { col: 1, desc: true }, () => { if (DADOS) renderGestor(DADOS); });
+  document.getElementById('corpoMidia').innerHTML = ordM.map(l =>
     '<tr><td><b>' + esc(l.nome) + '</b></td><td><b>' + moeda(l.gasto) + '</b></td>' +
     '<td>' + (l.entrega === null ? '—' : tag(pctTxt(l.entrega * 100), corEntrega(l.entrega))) + '</td>' +
     '<td>' + num(l.impressoes) + '</td><td>' + num(l.alcance) + '</td>' +
@@ -1868,7 +1984,21 @@ function renderAnuncios(base) {
   A.forEach(x => { (mediaCamp[x.id] = mediaCamp[x.id] || { imp: 0, cl: 0, gasto: 0, leads: 0 });
     mediaCamp[x.id].imp += x.impressoes; mediaCamp[x.id].cl += x.cliquesLink; mediaCamp[x.id].gasto += x.gasto; mediaCamp[x.id].leads += x.leads; });
   if (FILTRO.busca) A = A.filter(x => casaBusca(FILTRO.busca, x.anuncio, x.conjunto, x.nome));
-  A.sort((x, y) => y.gasto - x.gasto);
+  /* Ordena antes de cortar em 200: ordenar por CPL tem de trazer os 200 do CPL
+     escolhido, não os 200 que mais gastam. */
+  A = ordenar('tabelaAnuncios', A, [
+    x => x.anuncio,
+    x => x.nome,
+    x => x.gasto,
+    x => divisao(x.gasto, gastoCamp[x.id]),
+    x => x.impressoes,
+    x => x.freq,
+    x => x.ctrLink,
+    x => x.cpm,
+    x => x.leads,
+    x => x.leads ? x.gasto / x.leads : null,
+    null
+  ], { col: 2, desc: true }, () => { if (DADOS) renderAnuncios(DADOS); });
 
   const diag = x => {
     const m = mediaCamp[x.id] || { imp: 0, cl: 0, gasto: 0, leads: 0 };
