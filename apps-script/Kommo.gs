@@ -126,8 +126,11 @@ function etapasReuniao_() {
   return out;
 }
 
-/** Linhas prontas da aba, para as reuniões marcadas entre ini e fim. */
-function coletarReunioes_(ini, fim) {
+/** leadId -> { quando, funil } da PRIMEIRA entrada na etapa, entre ini e fim.
+    Vive sozinho porque o painel de pré-qualificação (KommoLeads.gs) precisa
+    exatamente deste mapa, e duas definições de "reunião marcada" seria uma a
+    mais do que o escritório aguenta conferir. */
+function primeirasEntradasAdvbox_(ini, fim) {
   var etapas = etapasReuniao_();
   if (!etapas.length) throw new Error('Nenhum funil tem a etapa "' + cfgKommo_('KOMMO_ETAPA_REUNIAO') + '".');
 
@@ -153,7 +156,12 @@ function coletarReunioes_(ini, fim) {
       if (ev.length < 250) break;
     }
   });
+  return primeiro;
+}
 
+/** Linhas prontas da aba, para as reuniões marcadas entre ini e fim. */
+function coletarReunioes_(ini, fim) {
+  var primeiro = primeirasEntradasAdvbox_(ini, fim);
   var ids = Object.keys(primeiro);
   var leads = buscarLeads_(ids);
   var campoCamp = cfgKommo_('KOMMO_CAMPO_CAMPANHA');
