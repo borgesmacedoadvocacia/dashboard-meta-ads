@@ -111,32 +111,54 @@ function sincronizarKommo() {
   return total;
 }
 
-/** Histórico inteiro desde DATA_INICIO. Refaz as duas abas do zero. */
+/** Histórico inteiro de reuniões desde DATA_INICIO. Refaz a aba do zero.
+    Os elegíveis têm comando próprio: são muito mais eventos e não cabem
+    junto nos 6 minutos de uma execução. */
 function sincronizarKommoCompleta() {
   var ini = dataDeIso_(cfgTexto_(cfg_('DATA_INICIO'))) || new Date(2025, 0, 1);
   var fim = new Date();
   gravarSync_({ kommoMensagem: 'Buscando reuniões desde ' + iso_(ini) + '…' });
   var novas = coletarReunioes_(ini, fim);
   var total = mesclarReunioes_(novas, ini, fim, true);
-  var totalEleg = sincronizarElegiveisCompleta_(ini, fim);
   gravarSync_({ kommoOk: agoraTxt_(), kommoErro: '',
-                kommoMensagem: 'Histórico: ' + total + ' reuniões e ' + totalEleg + ' elegíveis desde ' + iso_(ini) });
-  alertar_(total + ' reunião(ões) na aba "' + KOMMO_ABA + '" e ' + totalEleg + ' lead(s) elegível(is) na aba "' +
-    KOMMO_ABA_ELEGIVEIS + '", desde ' + iso_(ini) + '.');
+                kommoMensagem: 'Histórico de reuniões: ' + total + ' desde ' + iso_(ini) });
+  alertar_(total + ' reunião(ões) gravadas na aba "' + KOMMO_ABA + '", desde ' + iso_(ini) + '.\n\n' +
+    'Para os leads elegíveis: BM · Meta Ads → Elegíveis do Kommo (histórico).');
   return total;
 }
 
-/** Só o histórico de elegíveis — para preencher a aba nova sem refazer as reuniões. */
+/** Histórico de elegíveis, um mês por vez. Cada mês é gravado assim que
+    termina e a execução para antes do limite de 6 minutos, guardando onde
+    parou: basta rodar de novo até o aviso dizer que acabou. */
 function sincronizarElegiveisCompleta() {
-  var ini = dataDeIso_(cfgTexto_(cfg_('DATA_INICIO'))) || new Date(2025, 0, 1);
-  var total = sincronizarElegiveisCompleta_(ini, new Date());
-  alertar_(total + ' lead(s) elegível(is) gravados na aba "' + KOMMO_ABA_ELEGIVEIS + '", desde ' + iso_(ini) + '.');
+  var props = props_();
+  var inicioCfg = dataDeIso_(cfgTexto_(cfg_('DATA_INICIO'))) || new Date(2025, 0, 1);
+  var cursor = dataDeIso_(props.getProperty('KOMMO_ELEGIVEIS_CURSOR'));
+  if (!cursor) {
+    reescrever_(garantirAba_(planilha_(), KOMMO_ABA_ELEGIVEIS, KOMMO_CAB), KOMMO_CAB, []);
+    cursor = inicioCfg;
+  }
+  var t0 = Date.now(), agora = new Date();
+  while (cursor < agora) {
+    if (Date.now() - t0 > 4 * 60 * 1000) {
+      props.setProperty('KOMMO_ELEGIVEIS_CURSOR', iso_(cursor));
+      alertar_('Elegíveis gravados até ' + iso_(new Date(cursor.getTime() - 86400000)) +
+        '. Rode "Elegíveis do Kommo (histórico)" de novo para continuar.');
+      return;
+    }
+    var fimMes = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+    var fim = fimMes < agora ? new Date(fimMes.getTime() - 1000) : agora;
+    gravarSync_({ kommoMensagem: 'Buscando leads elegíveis de ' + iso_(cursor) + ' a ' + iso_(fim) + '…' });
+    mesclarEntradas_(KOMMO_ABA_ELEGIVEIS, coletarElegiveis_(cursor, fim), cursor, fim, false);
+    cursor = fimMes;
+  }
+  props.deleteProperty('KOMMO_ELEGIVEIS_CURSOR');
+  var ult = planilha_().getSheetByName(KOMMO_ABA_ELEGIVEIS).getLastRow();
+  var total = Math.max(ult - 1, 0);
+  gravarSync_({ kommoOk: agoraTxt_(), kommoErro: '',
+                kommoMensagem: 'Histórico de elegíveis: ' + total + ' desde ' + iso_(inicioCfg) });
+  alertar_(total + ' lead(s) elegível(is) gravados na aba "' + KOMMO_ABA_ELEGIVEIS + '", desde ' + iso_(inicioCfg) + '.');
   return total;
-}
-
-function sincronizarElegiveisCompleta_(ini, fim) {
-  gravarSync_({ kommoMensagem: 'Buscando leads elegíveis desde ' + iso_(ini) + '…' });
-  return mesclarEntradas_(KOMMO_ABA_ELEGIVEIS, coletarElegiveis_(ini, fim), ini, fim, true);
 }
 
 /* ============================================================== COLETA */
@@ -317,7 +339,14 @@ function kommoGet_(caminho, params) {
   var opcoes = { method: 'get', muteHttpExceptions: true,
                  headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } };
   for (var tentativa = 1; tentativa <= 4; tentativa++) {
-    var r = UrlFetchApp.fetch(url, opcoes);
+    var r;
+    /* "Endereço não disponível" e afins chegam como exceção, não como código
+       HTTP: são quedas de rede e merecem a mesma nova tentativa que um 5xx. */
+    try { r = UrlFetchApp.fetch(url, opcoes); }
+    catch (e) {
+      if (tentativa === 4) throw e;
+      Utilities.sleep(2000 * tentativa); continue;
+    }
     var c = r.getResponseCode();
     if (c === 200) {
       try { return JSON.parse(r.getContentText()); }
