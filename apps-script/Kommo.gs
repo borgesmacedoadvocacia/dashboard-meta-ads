@@ -11,6 +11,12 @@
    reunião. Por isso a leitura é pela API de eventos (lead_status_changed
    filtrada por value_after), e não pela lista de leads da etapa.
 
+   LEADS ELEGÍVEIS seguem a mesma regra, com outra lista de etapas: conta o
+   lead na PRIMEIRA vez que entrou em qualquer etapa de "Elegíveis" em
+   diante (KOMMO_ETAPAS_ELEGIVEL). Quem pulou direto para a qualificação ou
+   foi perdido depois dela também passou pela elegibilidade; Inelegível e
+   "Sem resposta: ELEGIBILIDADE" ficam de fora. Vão para a aba "Elegíveis".
+
    A campanha vem do campo personalizado "Campanha" do lead, que o Kommo
    recebe do Meta com o NOME EXATO da campanha — é o que permite casar com a
    aba Campanhas sem adivinhação. Lead sem esse campo preenchido (≈20% em
@@ -25,18 +31,25 @@
    ========================================================================= */
 
 var KOMMO_ABA = 'Reuniões';
+var KOMMO_ABA_ELEGIVEIS = 'Elegíveis';
 var KOMMO_CAB = ['Data', 'Hora', 'Funil', 'ID do lead', 'Lead', 'Campanha', 'Origem',
                  'Produto jurídico', 'Criado em', 'Atualizado em'];
 
 var KOMMO_PADRAO = {
   KOMMO_SUBDOMINIO: 'bmadvocacia',
   KOMMO_ETAPA_REUNIAO: 'Enviado ao ADVBOX',
+  KOMMO_ETAPAS_ELEGIVEL: 'Elegíveis; Análise de Qualificação; Respondeu FUP Qualificação; ' +
+    'Aguardando Documentação; Respondeu FUP Documentação; Análise de Viabilidade; Agendar Reunião; ' +
+    'Enviado ao ADVBOX; Pesquisa de Satisfação; Desqualificado; Inviável (Não tem abusividade); ' +
+    'Sem resposta: QUALIFICAÇÃO; Sem resposta: AGUARDANDO DOCUMENTO; Sem resposta: AGENDAR REUNIÃO; ' +
+    'Closed - won; Venda ganha',
   KOMMO_CAMPO_CAMPANHA: 'Campanha'
 };
 
 var KOMMO_DESCRICAO = {
   KOMMO_SUBDOMINIO: 'Subdomínio do Kommo (https://SUBDOMÍNIO.kommo.com).',
   KOMMO_ETAPA_REUNIAO: 'Nome da etapa que marca a reunião. Vale em todos os funis que a tiverem.',
+  KOMMO_ETAPAS_ELEGIVEL: 'Etapas, separadas por ponto e vírgula, que contam o lead como elegível (de "Elegíveis" em diante).',
   KOMMO_CAMPO_CAMPANHA: 'Campo personalizado do lead que traz o nome da campanha do Meta.'
 };
 
@@ -51,6 +64,7 @@ var KOMMO_LOTE = 40;
 function configurarKommo() {
   var ss = planilha_();
   garantirAba_(ss, KOMMO_ABA, KOMMO_CAB);
+  garantirAba_(ss, KOMMO_ABA_ELEGIVEIS, KOMMO_CAB);
   var aba = garantirAba_(ss, ABA.config, CAB.config);
   var atuais = {};
   var ult = aba.getLastRow();
@@ -89,22 +103,40 @@ function sincronizarKommo() {
   var fim = new Date();
   var novas = coletarReunioes_(ini, fim);
   var total = mesclarReunioes_(novas, ini, fim, false);
+  var novasEleg = coletarElegiveis_(ini, fim);
+  var totalEleg = mesclarEntradas_(KOMMO_ABA_ELEGIVEIS, novasEleg, ini, fim, false);
   gravarSync_({ kommoOk: agoraTxt_(), kommoErro: '',
-                kommoMensagem: novas.length + ' reunião(ões) na janela · ' + total + ' na aba' });
+                kommoMensagem: novas.length + ' reunião(ões) e ' + novasEleg.length + ' elegível(is) na janela · ' +
+                  total + ' reuniões e ' + totalEleg + ' elegíveis nas abas' });
   return total;
 }
 
-/** Histórico inteiro desde DATA_INICIO. Refaz a aba do zero. */
+/** Histórico inteiro desde DATA_INICIO. Refaz as duas abas do zero. */
 function sincronizarKommoCompleta() {
   var ini = dataDeIso_(cfgTexto_(cfg_('DATA_INICIO'))) || new Date(2025, 0, 1);
   var fim = new Date();
   gravarSync_({ kommoMensagem: 'Buscando reuniões desde ' + iso_(ini) + '…' });
   var novas = coletarReunioes_(ini, fim);
   var total = mesclarReunioes_(novas, ini, fim, true);
+  var totalEleg = sincronizarElegiveisCompleta_(ini, fim);
   gravarSync_({ kommoOk: agoraTxt_(), kommoErro: '',
-                kommoMensagem: 'Histórico de reuniões: ' + total + ' desde ' + iso_(ini) });
-  alertar_(total + ' reunião(ões) gravadas na aba "' + KOMMO_ABA + '", desde ' + iso_(ini) + '.');
+                kommoMensagem: 'Histórico: ' + total + ' reuniões e ' + totalEleg + ' elegíveis desde ' + iso_(ini) });
+  alertar_(total + ' reunião(ões) na aba "' + KOMMO_ABA + '" e ' + totalEleg + ' lead(s) elegível(is) na aba "' +
+    KOMMO_ABA_ELEGIVEIS + '", desde ' + iso_(ini) + '.');
   return total;
+}
+
+/** Só o histórico de elegíveis — para preencher a aba nova sem refazer as reuniões. */
+function sincronizarElegiveisCompleta() {
+  var ini = dataDeIso_(cfgTexto_(cfg_('DATA_INICIO'))) || new Date(2025, 0, 1);
+  var total = sincronizarElegiveisCompleta_(ini, new Date());
+  alertar_(total + ' lead(s) elegível(is) gravados na aba "' + KOMMO_ABA_ELEGIVEIS + '", desde ' + iso_(ini) + '.');
+  return total;
+}
+
+function sincronizarElegiveisCompleta_(ini, fim) {
+  gravarSync_({ kommoMensagem: 'Buscando leads elegíveis desde ' + iso_(ini) + '…' });
+  return mesclarEntradas_(KOMMO_ABA_ELEGIVEIS, coletarElegiveis_(ini, fim), ini, fim, true);
 }
 
 /* ============================================================== COLETA */
@@ -113,14 +145,24 @@ function sincronizarKommoCompleta() {
     (e não por ID fixo) é o que mantém isto de pé quando alguém recria o
     funil ou duplica a etapa num funil novo. */
 function etapasReuniao_() {
-  var alvo = normKommo_(cfgKommo_('KOMMO_ETAPA_REUNIAO'));
+  return etapasPorNome_([cfgKommo_('KOMMO_ETAPA_REUNIAO')]);
+}
+
+/** Etapas de "Elegíveis" em diante, em todos os funis que as tiverem. */
+function etapasElegivel_() {
+  return etapasPorNome_(String(cfgKommo_('KOMMO_ETAPAS_ELEGIVEL')).split(';'));
+}
+
+function etapasPorNome_(nomes) {
+  var alvos = {};
+  nomes.forEach(function (n) { if (normKommo_(n)) alvos[normKommo_(n)] = true; });
   var j = kommoGet_('/leads/pipelines', { limit: 250 });
   var funis = j && j._embedded && j._embedded.pipelines ? j._embedded.pipelines : [];
   var out = [];
   funis.forEach(function (p) {
     var sts = (p._embedded && p._embedded.statuses) || [];
     sts.forEach(function (s) {
-      if (normKommo_(s.name) === alvo) out.push({ funil: p.name, funilId: p.id, etapa: s.name, etapaId: s.id });
+      if (alvos[normKommo_(s.name)]) out.push({ funil: p.name, funilId: p.id, etapa: s.name, etapaId: s.id });
     });
   });
   return out;
@@ -133,7 +175,11 @@ function etapasReuniao_() {
 function primeirasEntradasAdvbox_(ini, fim) {
   var etapas = etapasReuniao_();
   if (!etapas.length) throw new Error('Nenhum funil tem a etapa "' + cfgKommo_('KOMMO_ETAPA_REUNIAO') + '".');
+  return primeirasEntradas_(etapas, ini, fim);
+}
 
+/** leadId -> { quando, funil } da PRIMEIRA entrada em qualquer uma das etapas. */
+function primeirasEntradas_(etapas, ini, fim) {
   var de = Math.floor(ini.getTime() / 1000), ate = Math.floor(fim.getTime() / 1000);
   var primeiro = {};
   etapas.forEach(function (et) {
@@ -161,7 +207,17 @@ function primeirasEntradasAdvbox_(ini, fim) {
 
 /** Linhas prontas da aba, para as reuniões marcadas entre ini e fim. */
 function coletarReunioes_(ini, fim) {
-  var primeiro = primeirasEntradasAdvbox_(ini, fim);
+  return linhasDeEntradas_(primeirasEntradasAdvbox_(ini, fim));
+}
+
+/** Linhas prontas da aba Elegíveis, para quem virou elegível entre ini e fim. */
+function coletarElegiveis_(ini, fim) {
+  var etapas = etapasElegivel_();
+  if (!etapas.length) throw new Error('Nenhum funil tem as etapas de KOMMO_ETAPAS_ELEGIVEL.');
+  return linhasDeEntradas_(primeirasEntradas_(etapas, ini, fim));
+}
+
+function linhasDeEntradas_(primeiro) {
   var ids = Object.keys(primeiro);
   var leads = buscarLeads_(ids);
   var campoCamp = cfgKommo_('KOMMO_CAMPO_CAMPANHA');
@@ -215,7 +271,11 @@ function campoLead_(lead, nome) {
 /* ============================================================== GRAVAÇÃO */
 
 function mesclarReunioes_(novas, ini, fim, completa) {
-  var aba = garantirAba_(planilha_(), KOMMO_ABA, KOMMO_CAB);
+  return mesclarEntradas_(KOMMO_ABA, novas, ini, fim, completa);
+}
+
+function mesclarEntradas_(nomeAba, novas, ini, fim, completa) {
+  var aba = garantirAba_(planilha_(), nomeAba, KOMMO_CAB);
   var ult = aba.getLastRow();
   var antigas = ult > 1 ? aba.getRange(2, 1, ult - 1, KOMMO_CAB.length).getValues() : [];
   var deTxt = iso_(ini), ateTxt = iso_(fim);
