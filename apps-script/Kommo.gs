@@ -32,6 +32,7 @@
 
 var KOMMO_ABA = 'Reuniões';
 var KOMMO_ABA_ELEGIVEIS = 'Elegíveis';
+var KOMMO_ABA_QUALIFICADOS = 'Qualificados';
 var KOMMO_CAB = ['Data', 'Hora', 'Funil', 'ID do lead', 'Lead', 'Campanha', 'Origem',
                  'Produto jurídico', 'Criado em', 'Atualizado em'];
 
@@ -43,6 +44,18 @@ var KOMMO_PADRAO = {
     'Enviado ao ADVBOX; Pesquisa de Satisfação; Desqualificado; Inviável (Não tem abusividade); ' +
     'Sem resposta: QUALIFICAÇÃO; Sem resposta: AGUARDANDO DOCUMENTO; Sem resposta: AGENDAR REUNIÃO; ' +
     'Closed - won; Venda ganha',
+  /* Um degrau acima: qualificado é quem chegou à documentação. Sai da lista
+     de elegível o trecho da qualificação em si (Elegíveis, Análise de
+     Qualificação, Respondeu FUP Qualificação) e quem morreu lá
+     (Desqualificado, Sem resposta: QUALIFICAÇÃO). Entram as etapas de FUP -
+     Documentação, porque o lead pode ir da qualificação direto para o funil
+     de follow up e ainda assim ter sido qualificado. */
+  KOMMO_ETAPAS_QUALIFICADO: 'Aguardando Documentação; Respondeu FUP Documentação; ' +
+    'Análise de Viabilidade; Agendar Reunião; Enviado ao ADVBOX; Pesquisa de Satisfação; ' +
+    'Inviável (Não tem abusividade); Sem resposta: AGUARDANDO DOCUMENTO; ' +
+    'Sem resposta: AGENDAR REUNIÃO; Closed - won; Venda ganha; ' +
+    'FUP 1 - Documentação; FUP 2 - Documentação; FUP 3 - Documentação; FUP 4 - Documentação; ' +
+    'FUP 5 - Documentação; FUP 6 - Documentação; FUP 7 - Documentação',
   KOMMO_CAMPO_CAMPANHA: 'Campanha'
 };
 
@@ -50,6 +63,7 @@ var KOMMO_DESCRICAO = {
   KOMMO_SUBDOMINIO: 'Subdomínio do Kommo (https://SUBDOMÍNIO.kommo.com).',
   KOMMO_ETAPA_REUNIAO: 'Nome da etapa que marca a reunião. Vale em todos os funis que a tiverem.',
   KOMMO_ETAPAS_ELEGIVEL: 'Etapas, separadas por ponto e vírgula, que contam o lead como elegível (de "Elegíveis" em diante).',
+  KOMMO_ETAPAS_QUALIFICADO: 'Etapas, separadas por ponto e vírgula, que contam o lead como qualificado (de "Aguardando Documentação" em diante).',
   KOMMO_CAMPO_CAMPANHA: 'Campo personalizado do lead que traz o nome da campanha do Meta.'
 };
 
@@ -65,6 +79,7 @@ function configurarKommo() {
   var ss = planilha_();
   garantirAba_(ss, KOMMO_ABA, KOMMO_CAB);
   garantirAba_(ss, KOMMO_ABA_ELEGIVEIS, KOMMO_CAB);
+  garantirAba_(ss, KOMMO_ABA_QUALIFICADOS, KOMMO_CAB);
   var aba = garantirAba_(ss, ABA.config, CAB.config);
   var atuais = {};
   var ult = aba.getLastRow();
@@ -105,9 +120,12 @@ function sincronizarKommo() {
   var total = mesclarReunioes_(novas, ini, fim, false);
   var novasEleg = coletarElegiveis_(ini, fim);
   var totalEleg = mesclarEntradas_(KOMMO_ABA_ELEGIVEIS, novasEleg, ini, fim, false);
+  var novasQual = coletarQualificados_(ini, fim);
+  var totalQual = mesclarEntradas_(KOMMO_ABA_QUALIFICADOS, novasQual, ini, fim, false);
   gravarSync_({ kommoOk: agoraTxt_(), kommoErro: '',
-                kommoMensagem: novas.length + ' reunião(ões) e ' + novasEleg.length + ' elegível(is) na janela · ' +
-                  total + ' reuniões e ' + totalEleg + ' elegíveis nas abas' });
+                kommoMensagem: novas.length + ' reunião(ões), ' + novasEleg.length + ' elegível(is) e ' +
+                  novasQual.length + ' qualificado(s) na janela · ' + total + ' reuniões, ' +
+                  totalEleg + ' elegíveis e ' + totalQual + ' qualificados nas abas' });
   return total;
 }
 
@@ -131,33 +149,47 @@ function sincronizarKommoCompleta() {
     termina e a execução para antes do limite de 6 minutos, guardando onde
     parou: basta rodar de novo até o aviso dizer que acabou. */
 function sincronizarElegiveisCompleta() {
+  return historicoMensal_(KOMMO_ABA_ELEGIVEIS, coletarElegiveis_, 'KOMMO_ELEGIVEIS_CURSOR',
+    'elegível(is)', 'Elegíveis do Kommo (histórico)');
+}
+
+/** Histórico de qualificados, pelo mesmo caminho dos elegíveis. */
+function sincronizarQualificadosCompleta() {
+  return historicoMensal_(KOMMO_ABA_QUALIFICADOS, coletarQualificados_, 'KOMMO_QUALIFICADOS_CURSOR',
+    'qualificado(s)', 'Qualificados do Kommo (histórico)');
+}
+
+/** Carga de histórico mês a mês, retomável: grava cada mês assim que termina
+    e para antes dos 6 minutos guardando onde parou. Serve para qualquer aba
+    de entradas — o que muda é a lista de etapas de cada coletor. */
+function historicoMensal_(nomeAba, coletor, chaveCursor, rotulo, comandoMenu) {
   var props = props_();
   var inicioCfg = dataDeIso_(cfgTexto_(cfg_('DATA_INICIO'))) || new Date(2025, 0, 1);
-  var cursor = dataDeIso_(props.getProperty('KOMMO_ELEGIVEIS_CURSOR'));
+  var cursor = dataDeIso_(props.getProperty(chaveCursor));
   if (!cursor) {
-    reescrever_(garantirAba_(planilha_(), KOMMO_ABA_ELEGIVEIS, KOMMO_CAB), KOMMO_CAB, []);
+    reescrever_(garantirAba_(planilha_(), nomeAba, KOMMO_CAB), KOMMO_CAB, []);
     cursor = inicioCfg;
   }
   var t0 = Date.now(), agora = new Date();
   while (cursor < agora) {
     if (Date.now() - t0 > 4 * 60 * 1000) {
-      props.setProperty('KOMMO_ELEGIVEIS_CURSOR', iso_(cursor));
-      alertar_('Elegíveis gravados até ' + iso_(new Date(cursor.getTime() - 86400000)) +
-        '. Rode "Elegíveis do Kommo (histórico)" de novo para continuar.');
+      props.setProperty(chaveCursor, iso_(cursor));
+      alertar_(nomeAba + ' gravados até ' + iso_(new Date(cursor.getTime() - 86400000)) +
+        '. Rode "' + comandoMenu + '" de novo para continuar.');
       return;
     }
     var fimMes = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
     var fim = fimMes < agora ? new Date(fimMes.getTime() - 1000) : agora;
-    gravarSync_({ kommoMensagem: 'Buscando leads elegíveis de ' + iso_(cursor) + ' a ' + iso_(fim) + '…' });
-    mesclarEntradas_(KOMMO_ABA_ELEGIVEIS, coletarElegiveis_(cursor, fim), cursor, fim, false);
+    gravarSync_({ kommoMensagem: 'Buscando ' + nomeAba + ' de ' + iso_(cursor) + ' a ' + iso_(fim) + '…' });
+    mesclarEntradas_(nomeAba, coletor(cursor, fim), cursor, fim, false);
     cursor = fimMes;
   }
-  props.deleteProperty('KOMMO_ELEGIVEIS_CURSOR');
-  var ult = planilha_().getSheetByName(KOMMO_ABA_ELEGIVEIS).getLastRow();
+  props.deleteProperty(chaveCursor);
+  var ult = planilha_().getSheetByName(nomeAba).getLastRow();
   var total = Math.max(ult - 1, 0);
   gravarSync_({ kommoOk: agoraTxt_(), kommoErro: '',
-                kommoMensagem: 'Histórico de elegíveis: ' + total + ' desde ' + iso_(inicioCfg) });
-  alertar_(total + ' lead(s) elegível(is) gravados na aba "' + KOMMO_ABA_ELEGIVEIS + '", desde ' + iso_(inicioCfg) + '.');
+                kommoMensagem: 'Histórico de ' + nomeAba + ': ' + total + ' desde ' + iso_(inicioCfg) });
+  alertar_(total + ' lead(s) ' + rotulo + ' gravados na aba "' + nomeAba + '", desde ' + iso_(inicioCfg) + '.');
   return total;
 }
 
@@ -173,6 +205,11 @@ function etapasReuniao_() {
 /** Etapas de "Elegíveis" em diante, em todos os funis que as tiverem. */
 function etapasElegivel_() {
   return etapasPorNome_(String(cfgKommo_('KOMMO_ETAPAS_ELEGIVEL')).split(';'));
+}
+
+/** Etapas de "Aguardando Documentação" em diante. */
+function etapasQualificado_() {
+  return etapasPorNome_(String(cfgKommo_('KOMMO_ETAPAS_QUALIFICADO')).split(';'));
 }
 
 function etapasPorNome_(nomes) {
@@ -236,6 +273,15 @@ function coletarReunioes_(ini, fim) {
 function coletarElegiveis_(ini, fim) {
   var etapas = etapasElegivel_();
   if (!etapas.length) throw new Error('Nenhum funil tem as etapas de KOMMO_ETAPAS_ELEGIVEL.');
+  return linhasDeEntradas_(primeirasEntradas_(etapas, ini, fim));
+}
+
+/** Idem para os qualificados: primeira entrada numa etapa de documentação
+    em diante. Todo qualificado passou pela elegibilidade antes — se a conta
+    der qualificados acima de elegíveis, é sinal de lista desalinhada. */
+function coletarQualificados_(ini, fim) {
+  var etapas = etapasQualificado_();
+  if (!etapas.length) throw new Error('Nenhum funil tem as etapas de KOMMO_ETAPAS_QUALIFICADO.');
   return linhasDeEntradas_(primeirasEntradas_(etapas, ini, fim));
 }
 

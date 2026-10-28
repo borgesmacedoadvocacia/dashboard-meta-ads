@@ -457,8 +457,8 @@
      na tela sem rolagem lateral. O cabeçalho pode quebrar em duas linhas —
      é o que economiza a largura das colunas de dinheiro. */
   #tabelaCampanhas { font-size:.76rem; min-width:0; }
-  #tabelaCampanhas thead th { padding:.45rem .35rem; font-size:.59rem; letter-spacing:.02em; white-space:normal; }
-  #tabelaCampanhas tbody td, #tabelaCampanhas tfoot td { padding:.45rem .35rem; }
+  #tabelaCampanhas thead th { padding:.45rem .3rem; font-size:.59rem; letter-spacing:.02em; white-space:normal; }
+  #tabelaCampanhas tbody td, #tabelaCampanhas tfoot td { padding:.45rem .3rem; }
   #tabelaCampanhas td:first-child { max-width:190px; line-height:1.25; }
   #tabelaCampanhas .tag-pct { padding:.12rem .3rem; font-size:.68rem; }
   @media (max-width:1280px) { #tabelaCampanhas { min-width:1180px; } }
@@ -567,7 +567,8 @@
     <section class="secao">
       <div class="secao-titulo">Campanha a campanha</div>
       <div class="secao-sub">CPL = gasto ÷ leads · <b>Elegíveis</b> = leads que avançaram no Kommo da etapa <b>Elegíveis</b> em diante no período,
-        pela data em que entraram · <b>Custo/eleg.</b> = gasto ÷ elegíveis · <b>Reuniões</b> = leads que entraram na etapa <b>Enviado ao ADVBOX</b> do Kommo no período, pela data em que
+        pela data em que entraram · <b>Custo/eleg.</b> = gasto ÷ elegíveis · <b>Qualif.</b> = leads que chegaram de <b>Aguardando Documentação</b>
+        em diante, pela mesma régua (todo qualificado passou antes pela elegibilidade) · <b>Reuniões</b> = leads que entraram na etapa <b>Enviado ao ADVBOX</b> do Kommo no período, pela data em que
         foram movidos · <b>Conv. reun.</b> = reuniões ÷ leads · <b>Custo/reun.</b> = gasto ÷ reuniões · Conv. cliente = clientes ÷ leads ·
         CAC = gasto ÷ clientes · ROI = retorno ÷ gasto (quanto voltou por R$ 1). Orç./mês = orçamento diário × dias do mês corrente.<br>
         <b>Clique no título de uma coluna para ordenar</b> — clicar de novo inverte. Linha sem valor fica sempre no fim.
@@ -584,7 +585,7 @@
           <table id="tabelaCampanhas">
             <thead><tr>
               <th>Campanha</th><th>Status</th><th>Orç./dia</th><th>Orç./mês</th><th>Gasto</th>
-              <th>Leads</th><th>CPL</th><th>Elegíveis</th><th>Custo/eleg.</th><th>Reuniões</th><th>Conv. reun.</th><th>Custo/reun.</th>
+              <th>Leads</th><th>CPL</th><th>Eleg.</th><th>Custo/eleg.</th><th>Qualif.</th><th>Reuniões</th><th>Conv. reun.</th><th>Custo/reun.</th>
               <th>Clientes</th><th>Retorno</th><th>Conv. cliente</th><th>CAC</th><th>ROI</th>
             </tr></thead>
             <tbody id="corpoCampanhas"></tbody>
@@ -1188,6 +1189,7 @@ function ligarKPIs(mapa) {
 const ABAS_META = ['Insights diários', 'Janelas', 'Anúncios', 'Campanhas', 'Mapeamento', '_Sync'];
 const ABA_REUNIOES = 'Reuniões';
 const ABA_ELEGIVEIS = 'Elegíveis';
+const ABA_QUALIFICADOS = 'Qualificados';
 const ABA_FLUXO = 'DADOS';
 const LS_WEBAPP = 'bm_metaads_webapp';
 const LS_TOKEN  = 'bm_metaads_token';
@@ -1234,13 +1236,16 @@ async function buscarTudo() {
   /* Reuniões vai em chamada própria, e não no lote das abas do Meta: a aba é
      criada pelo coletor do Kommo e, enquanto não existir, um range inválido
      derrubaria o batchGet inteiro — o painel sumiria por causa de uma coluna. */
-  const [meta, reunioes, elegiveis, ...fluxos] = await Promise.all([
+  const [meta, reunioes, elegiveis, qualificados, ...fluxos] = await Promise.all([
     lerAbasDe(CONFIG.SHEET_ID, ABAS_META.map(aspas)),
     lerAbasDe(CONFIG.SHEET_ID, [aspas(ABA_REUNIOES)]).catch(e => {
       console.warn('Aba ' + ABA_REUNIOES + ' indisponível: ' + e.message); return [[]];
     }),
     lerAbasDe(CONFIG.SHEET_ID, [aspas(ABA_ELEGIVEIS)]).catch(e => {
       console.warn('Aba ' + ABA_ELEGIVEIS + ' indisponível: ' + e.message); return [[]];
+    }),
+    lerAbasDe(CONFIG.SHEET_ID, [aspas(ABA_QUALIFICADOS)]).catch(e => {
+      console.warn('Aba ' + ABA_QUALIFICADOS + ' indisponível: ' + e.message); return [[]];
     })
   ].concat(ids.map(id => lerAbasDe(id, [aspas(ABA_FLUXO)]).catch(e => {
     console.warn('Fluxo ' + id + ' não respondeu: ' + e.message); return [[]];
@@ -1249,6 +1254,7 @@ async function buscarTudo() {
   return montarBase({
     insights: t(0), janelas: t(1), anuncios: t(2), campanhas: t(3), mapeamento: t(4),
     sync: meta[5] || [], reunioes: tabela(reunioes[0] || []), elegiveis: tabela(elegiveis[0] || []),
+    qualificados: tabela(qualificados[0] || []),
     /* Cada planilha tem o próprio cabeçalho: resolve-se por nome em cada uma. */
     fluxos: fluxos.map((f, i) => Object.assign(tabela(f[0] || []), { planilha: ids[i] }))
   });
@@ -1284,7 +1290,8 @@ function montarBase(bruto) {
   const c = bruto.campanhas.cab, ci = bruto.insights.cab, cj = bruto.janelas.cab,
         ca = bruto.anuncios.cab, cm = bruto.mapeamento.cab,
         cr = (bruto.reunioes || { cab: [], linhas: [] }).cab,
-        ce = (bruto.elegiveis || { cab: [], linhas: [] }).cab;
+        ce = (bruto.elegiveis || { cab: [], linhas: [] }).cab,
+        cq = (bruto.qualificados || { cab: [], linhas: [] }).cab;
 
   /* Campanhas: identidade, orçamento e status. */
   const campanhas = {};
@@ -1362,6 +1369,15 @@ function montarBase(bruto) {
     campanha: campo(l, ce, 'Campanha', 'F')
   })).filter(r => r.data);
 
+  /* Qualificados: um degrau acima do elegível — primeira entrada numa etapa
+     de documentação em diante. Mesma aba, mesmo formato. */
+  const qualificados = ((bruto.qualificados || { linhas: [] }).linhas).map(l => ({
+    data: dataISO(campo(l, cq, 'Data', 'A')),
+    leadId: campo(l, cq, 'ID do lead', 'D'),
+    lead: campo(l, cq, 'Lead', 'E'),
+    campanha: campo(l, cq, 'Campanha', 'F')
+  })).filter(r => r.data);
+
   /* Mapeamento manual: Origem -> nome exato da campanha. */
   const manual = {};
   bruto.mapeamento.linhas.forEach(l => {
@@ -1400,7 +1416,7 @@ function montarBase(bruto) {
   const sync = {};
   (bruto.sync || []).slice(1).forEach(l => { if (l && l[0]) sync[String(l[0])] = l[1]; });
 
-  const base = { campanhas, insights, janelas, anuncios, fluxo, manual, sync, reunioes, elegiveis };
+  const base = { campanhas, insights, janelas, anuncios, fluxo, manual, sync, reunioes, elegiveis, qualificados };
   base.mapa = casarOrigens(base);
   base.mapaReuniao = casarCampanhasKommo(base);
   /* Só entra na lista depois do casamento, para não concorrer com as
@@ -1497,7 +1513,7 @@ function casarCampanhasKommo(base) {
   Object.values(base.campanhas).forEach(c => { nomes[normTxt(c.nome)] = c; });
   const lista = Object.values(base.campanhas);
   const mapa = {};
-  [...new Set(base.reunioes.concat(base.elegiveis).map(r => r.campanha).filter(Boolean))].forEach(nome => {
+  [...new Set(base.reunioes.concat(base.elegiveis, base.qualificados).map(r => r.campanha).filter(Boolean))].forEach(nome => {
     const n = normTxt(nome);
     if (base.manual[n] && nomes[base.manual[n]]) {
       mapa[nome] = { nome, campanha: nomes[base.manual[n]], como: 'aba Mapeamento' }; return;
@@ -1541,12 +1557,13 @@ const daConta = r => FILTRO.conta === 'todas' || String(r.conta) === FILTRO.cont
 function somarLinhas(linhas) {
   const tot = linhas.reduce((t, a) => {
     t.gasto += a.gasto; t.leads += a.leads; t.clientes += a.clientes; t.retorno += a.retorno; t.entrada += a.entrada;
-    t.reunioes += a.reunioes; t.elegiveis += a.elegiveis;
+    t.reunioes += a.reunioes; t.elegiveis += a.elegiveis; t.qualificados += a.qualificados;
     t.orcDiario += a.campanha.status === 'ACTIVE' ? a.orcDiario : 0;
     t.orcMensal += a.campanha.status === 'ACTIVE' ? a.orcMensal : 0;
     return t;
-  }, { gasto: 0, leads: 0, clientes: 0, retorno: 0, entrada: 0, orcDiario: 0, orcMensal: 0, reunioes: 0, elegiveis: 0 });
+  }, { gasto: 0, leads: 0, clientes: 0, retorno: 0, entrada: 0, orcDiario: 0, orcMensal: 0, reunioes: 0, elegiveis: 0, qualificados: 0 });
   tot.custoElegivel = tot.gasto ? divisao(tot.gasto, tot.elegiveis) : null;
+  tot.custoQualificado = tot.gasto ? divisao(tot.gasto, tot.qualificados) : null;
   tot.cpl = divisao(tot.gasto, tot.leads); tot.conversao = divisao(tot.clientes, tot.leads);
   tot.cac = divisao(tot.gasto, tot.clientes); tot.roi = divisao(tot.retorno, tot.gasto);
   tot.convReuniao = divisao(tot.reunioes, tot.leads);
@@ -1563,7 +1580,8 @@ function analisar(base) {
   const garantir = c => porCamp[c.id] || (porCamp[c.id] = {
     campanha: c, gasto: 0, leads: 0, leadsForm: 0, conversas: 0, leadsPixel: 0, impressoes: 0,
     cliquesLink: 0, dias: 0, clientes: 0, retorno: 0, entrada: 0, fechamentos: [],
-    reunioes: 0, reunioesLista: [], elegiveis: 0, elegiveisLista: [] });
+    reunioes: 0, reunioesLista: [], elegiveis: 0, elegiveisLista: [],
+    qualificados: 0, qualificadosLista: [] });
 
   base.insights.filter(r => daConta(r) && noPeriodo(r.data, per)).forEach(r => {
     const a = garantir(base.campanhas[r.id]);
@@ -1614,6 +1632,19 @@ function analisar(base) {
     } else semElegivel.push(r);
   });
 
+  /* Qualificados, pela mesma régua: data da primeira entrada numa etapa de
+     documentação em diante. */
+  const qualificadosPeriodo = base.qualificados.filter(r => noPeriodo(r.data, per));
+  const semQualificado = [];
+  qualificadosPeriodo.forEach(r => {
+    const m = r.campanha ? base.mapaReuniao[r.campanha] : null;
+    const camp = m && m.campanha;
+    if (camp && (FILTRO.conta === 'todas' || camp === CAMPANHA_GENERICA || String(camp.conta) === FILTRO.conta)) {
+      const a = garantir(camp);
+      a.qualificados++; a.qualificadosLista.push(r);
+    } else semQualificado.push(r);
+  });
+
   const linhas = Object.values(porCamp).map(a => {
     const c = a.campanha;
     a.orcDiario = c.orcDiario; a.orcMensal = c.orcVitalicio && !c.orcDiario ? c.orcVitalicio : c.orcDiario * diasDoMes;
@@ -1624,6 +1655,7 @@ function analisar(base) {
        pausada que ainda colhe reunião antiga se lê como reunião de graça. */
     a.custoReuniao = a.gasto ? divisao(a.gasto, a.reunioes) : null;
     a.custoElegivel = a.gasto ? divisao(a.gasto, a.elegiveis) : null;
+    a.custoQualificado = a.gasto ? divisao(a.gasto, a.qualificados) : null;
     return a;
   }).sort((x, y) => y.gasto - x.gasto);
 
@@ -1659,7 +1691,8 @@ function analisar(base) {
   const cobertura = { faltando, grave, gastoMetaMes, ehMesAtual: FILTRO.periodo === 'mes' };
 
   return { per, linhas, tot, fechamentos, semCampanha, serie, ultimaData, diasDoMes, cobertura,
-           reunioesPeriodo, semReuniao, elegiveisPeriodo, semElegivel };
+           reunioesPeriodo, semReuniao, elegiveisPeriodo, semElegivel,
+           qualificadosPeriodo, semQualificado };
 }
 
 /* ================================================================ RENDER */
@@ -1866,6 +1899,7 @@ function renderResultados(base, a) {
     l => l.cpl,
     l => l.elegiveis,
     l => l.custoElegivel,
+    l => l.qualificados,
     l => l.reunioes,
     l => l.convReuniao,
     l => l.custoReuniao,
@@ -1886,6 +1920,7 @@ function renderResultados(base, a) {
     '<td>' + (l.cpl === null ? '—' : moeda(l.cpl)) + '</td>' +
     '<td>' + (l.elegiveis ? '<b>' + num(l.elegiveis) + '</b>' : '—') + '</td>' +
     '<td>' + (l.custoElegivel === null ? '—' : moeda(l.custoElegivel)) + '</td>' +
+    '<td>' + (l.qualificados ? '<b>' + num(l.qualificados) + '</b>' : '—') + '</td>' +
     '<td>' + (l.reunioes ? '<b>' + num(l.reunioes) + '</b>' : '—') + '</td>' +
     '<td>' + pctTxt(l.convReuniao === null ? null : l.convReuniao * 100) + '</td>' +
     '<td>' + (l.custoReuniao === null ? '—' : moeda(l.custoReuniao)) + '</td>' +
@@ -1894,13 +1929,14 @@ function renderResultados(base, a) {
     '<td>' + pctTxt(l.conversao === null ? null : l.conversao * 100) + '</td>' +
     '<td>' + (l.cac === null ? '—' : moeda(l.cac)) + '</td>' +
     '<td>' + roiTag(l.roi) + '</td></tr>'
-  ).join('') || '<tr><td colspan="17">Nenhuma campanha com dados no período.</td></tr>';
+  ).join('') || '<tr><td colspan="18">Nenhuma campanha com dados no período.</td></tr>';
   document.getElementById('rodapeCampanhas').innerHTML = ord.length ?
     '<tr><td><b>Total</b></td><td></td><td>' + moeda(totTabela.orcDiario) + '</td><td>' + moeda(totTabela.orcMensal) + '</td>' +
     '<td><b>' + moeda(totTabela.gasto) + '</b></td><td><b>' + num(totTabela.leads) + '</b></td>' +
     '<td>' + (totTabela.cpl === null ? '—' : moeda(totTabela.cpl)) + '</td>' +
     '<td><b>' + num(totTabela.elegiveis) + '</b></td>' +
     '<td>' + (totTabela.custoElegivel === null ? '—' : moeda(totTabela.custoElegivel)) + '</td>' +
+    '<td><b>' + num(totTabela.qualificados) + '</b></td>' +
     '<td><b>' + num(totTabela.reunioes) + '</b></td>' +
     '<td>' + pctTxt(totTabela.convReuniao === null ? null : totTabela.convReuniao * 100) + '</td>' +
     '<td>' + (totTabela.custoReuniao === null ? '—' : moeda(totTabela.custoReuniao)) + '</td>' +
@@ -1985,7 +2021,8 @@ function fichaCampanha(l, base, a) {
   abrirLista({
     titulo: l.campanha.nome,
     sub: 'Dia a dia no período · ' + moeda(l.gasto) + ' · ' + num(l.leads) + ' leads · ' +
-      num(l.elegiveis) + ' elegível(is) · ' + num(l.reunioes) + ' reunião(ões) · ' + num(l.clientes) + ' cliente(s)',
+      num(l.elegiveis) + ' elegível(is) · ' + num(l.qualificados) + ' qualificado(s) · ' +
+      num(l.reunioes) + ' reunião(ões) · ' + num(l.clientes) + ' cliente(s)',
     colunas: [
       { r: 'Dia', chave: 'data', formata: v => fmtData(v) },
       { r: 'Gasto', chave: 'gasto', alinha: 'dir', formata: v => moeda(v) },
@@ -2005,6 +2042,12 @@ function fichaCampanha(l, base, a) {
           (l.leads ? ' — <b>' + pctTxt(l.elegiveis / l.leads * 100) + '</b> dos leads' : '') +
           (l.custoElegivel === null ? '' : ' · <b>' + moeda(l.custoElegivel) + '</b> por lead elegível')
         : 'Nenhum lead elegível no Kommo ligado a esta campanha no período.' },
+      { tipo: '', html: l.qualificados
+        ? '<b>' + num(l.qualificados) + '</b> lead(s) qualificado(s) no período (Kommo, de <i>Aguardando Documentação</i> em diante)' +
+          (l.leads ? ' — <b>' + pctTxt(l.qualificados / l.leads * 100) + '</b> dos leads' : '') +
+          (l.elegiveis ? ' · <b>' + pctTxt(l.qualificados / l.elegiveis * 100) + '</b> dos elegíveis' : '') +
+          (l.custoQualificado === null ? '' : ' · <b>' + moeda(l.custoQualificado) + '</b> por qualificado')
+        : 'Nenhum lead qualificado no Kommo ligado a esta campanha no período.' },
       { tipo: '', html: l.reunioes
         ? '<b>' + num(l.reunioes) + '</b> reunião(ões) marcada(s) no período (Kommo, etapa <i>Enviado ao ADVBOX</i>)' +
           (l.convReuniao === null ? '' : ' — <b>' + pctTxt(l.convReuniao * 100) + '</b> dos leads') +

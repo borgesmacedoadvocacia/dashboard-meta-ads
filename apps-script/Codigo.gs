@@ -115,6 +115,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Reuniões do Kommo (histórico)', 'sincronizarKommoCompleta')
     .addItem('Elegíveis do Kommo (histórico)', 'sincronizarElegiveisCompleta')
+    .addItem('Qualificados do Kommo (histórico)', 'sincronizarQualificadosCompleta')
     .addItem('Testar conexão com o Kommo', 'verificarKommo')
     .addSeparator()
     .addItem('Testar conexão com o Meta', 'testarConexao')
