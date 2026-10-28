@@ -26,6 +26,8 @@ O Apps Script (`apps-script/Codigo.gs`, vinculado à planilha) grava:
 | Campanhas | orçamento diário/vitalício (somando conjuntos quando o orçamento é por conjunto) e status |
 | Mapeamento | ORIGEM do Fluxo de Clientes → nome exato da campanha; o que estiver aqui vence o casamento automático |
 | Reuniões | uma linha por lead que entrou na etapa **Enviado ao ADVBOX** do Kommo — data, lead, campanha, origem e produto |
+| Elegíveis | idem, para quem entrou numa etapa de **Elegíveis** em diante |
+| Qualificados | idem, para quem chegou de **Aguardando Documentação** em diante |
 | _Config | contas, data de início, tipos de ação que contam como lead, subdomínio e etapa do Kommo |
 | _Sync | estado da última sincronização, mostrado no topo do painel |
 
@@ -53,6 +55,15 @@ do script → `META_ACCESS_TOKEN`*. O do Kommo, idem, em `KOMMO_TOKEN`.
   incremental de hora em hora mantém a aba sozinha; se o Kommo falhar, a sincronização do Meta
   segue normalmente e o erro fica em `_Sync` (`kommoErro`).
 - O histórico do Kommo começa em **junho de 2025** — antes disso a etapa não era usada.
+- **Elegíveis e qualificados** seguem a mesma leitura de eventos, cada um com sua lista de etapas
+  em `_Config` (`KOMMO_ETAPAS_ELEGIVEL`, `KOMMO_ETAPAS_QUALIFICADO`): não é "a etapa é X", é
+  "o lead passou do ponto X", contado na primeira entrada. Por isso quem está em
+  *Sem resposta: QUALIFICAÇÃO* já conta como elegível, e quem foi para *Inviável* já conta como
+  qualificado. Todo qualificado passou antes pela elegibilidade — qualificados acima de elegíveis
+  é sinal de lista desalinhada.
+- O histórico dessas duas abas é carregado **mês a mês**: rode
+  **Elegíveis / Qualificados do Kommo (histórico)** no menu até o aviso dizer que terminou. Cada
+  execução grava o que deu tempo e guarda onde parou.
 - A aba **Mapeamento** vale também para o campo `Campanha` do Kommo: quando a automação do
   WhatsApp continua carimbando o nome de uma campanha antiga, aponte o nome velho para a que
   está no ar e as reuniões passam a cair na linha certa.
@@ -61,7 +72,8 @@ do script → `META_ACCESS_TOKEN`*. O do Kommo, idem, em `KOMMO_TOKEN`.
 
 **Resultados das campanhas** — por período (mês atual por padrão; últimos 30 dias, últimos
 3 meses, este ano, todo o período, mês escolhido ou período livre): nome, orçamento diário e mensal, gasto,
-leads, custo por lead, **reuniões marcadas, conversão lead → reunião e custo por reunião**, clientes,
+leads, custo por lead, **leads elegíveis e custo por elegível**, **qualificados**,
+**reuniões marcadas, conversão lead → reunião e custo por reunião**, clientes,
 retorno financeiro, conversão lead → cliente, CAC e ROI. O filtro **Campanhas: só as ativas** corta
 antes do total, dos cartões e dos gráficos — não só da tabela — e o recorte diz quantas ficaram de fora.
 Retorno = **honorários iniciais** dos fechamentos com **pagamento confirmado**, pela **data do
@@ -87,6 +99,6 @@ dependência de um único anúncio).
 ```
 index.html              painel (HTML + CSS + JS, sem build)
 apps-script/Codigo.gs   coletor Meta → planilha (colar no Apps Script da planilha)
-apps-script/Kommo.gs    coletor das reuniões marcadas no Kommo → aba Reuniões
+apps-script/Kommo.gs    coletor do Kommo → abas Reuniões, Elegíveis e Qualificados
 logo.png / favicon.png
 ```
