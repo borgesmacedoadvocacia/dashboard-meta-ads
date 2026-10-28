@@ -56,7 +56,13 @@ var KOMMO_PADRAO = {
     'Sem resposta: AGENDAR REUNIÃO; Closed - won; Venda ganha; ' +
     'FUP 1 - Documentação; FUP 2 - Documentação; FUP 3 - Documentação; FUP 4 - Documentação; ' +
     'FUP 5 - Documentação; FUP 6 - Documentação; FUP 7 - Documentação',
-  KOMMO_CAMPO_CAMPANHA: 'Campanha'
+  KOMMO_CAMPO_CAMPANHA: 'Campanha',
+  /* Janela própria, menor que a do Meta: aqui a varredura é por EVENTO,
+     e são 35 etapas entre reunião, elegível e qualificado. Refazer 35
+     dias de cada uma a cada hora estoura os 6 minutos do Apps Script —
+     e o evento é datado de quando aconteceu, então 7 dias pegam tudo
+     que mudou desde a última rodada. O histórico cobre o resto. */
+  KOMMO_DIAS_INCREMENTAL: '7'
 };
 
 var KOMMO_DESCRICAO = {
@@ -64,7 +70,8 @@ var KOMMO_DESCRICAO = {
   KOMMO_ETAPA_REUNIAO: 'Nome da etapa que marca a reunião. Vale em todos os funis que a tiverem.',
   KOMMO_ETAPAS_ELEGIVEL: 'Etapas, separadas por ponto e vírgula, que contam o lead como elegível (de "Elegíveis" em diante).',
   KOMMO_ETAPAS_QUALIFICADO: 'Etapas, separadas por ponto e vírgula, que contam o lead como qualificado (de "Aguardando Documentação" em diante).',
-  KOMMO_CAMPO_CAMPANHA: 'Campo personalizado do lead que traz o nome da campanha do Meta.'
+  KOMMO_CAMPO_CAMPANHA: 'Campo personalizado do lead que traz o nome da campanha do Meta.',
+  KOMMO_DIAS_INCREMENTAL: 'Quantos dias de eventos do Kommo a sincronização de hora em hora refaz.'
 };
 
 /* Lote de leads por chamada. O UrlFetchApp corta a URL em 2 KB e cada id
@@ -113,7 +120,7 @@ function verificarKommo() {
 
 /** Últimos DIAS_INCREMENTAL dias. Chamada pela sincronização de hora em hora. */
 function sincronizarKommo() {
-  var dias = Number(cfg_('DIAS_INCREMENTAL')) || 35;
+  var dias = Number(cfgKommo_('KOMMO_DIAS_INCREMENTAL')) || 7;
   var ini = new Date(hoje_().getTime() - (dias - 1) * 86400000);
   var fim = new Date();
   var novas = coletarReunioes_(ini, fim);
