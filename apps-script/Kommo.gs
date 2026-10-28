@@ -163,6 +163,23 @@ function sincronizarQualificadosCompleta() {
     e para antes dos 6 minutos guardando onde parou. Serve para qualquer aba
     de entradas — o que muda é a lista de etapas de cada coletor. */
 function historicoMensal_(nomeAba, coletor, chaveCursor, rotulo, comandoMenu) {
+  /* A incremental de hora em hora escreve nas mesmas abas. Sem o mesmo lock
+     que ela usa, as duas leem a aba, mesclam e reescrevem — e a última a
+     gravar apaga as linhas da outra. */
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    alertar_('A sincronização de hora em hora está rodando agora e escreve nas mesmas abas.\n' +
+             'Espere um minuto e rode "' + comandoMenu + '" de novo.');
+    return;
+  }
+  try {
+    return historicoMensalSemLock_(nomeAba, coletor, chaveCursor, rotulo, comandoMenu);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function historicoMensalSemLock_(nomeAba, coletor, chaveCursor, rotulo, comandoMenu) {
   var props = props_();
   var inicioCfg = dataDeIso_(cfgTexto_(cfg_('DATA_INICIO'))) || new Date(2025, 0, 1);
   var cursor = dataDeIso_(props.getProperty(chaveCursor));
