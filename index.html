@@ -755,6 +755,66 @@ async function abrirCofre(usuario, senha) {
 
 const CONFIG = { SHEET_ID: null, GOOGLE_API_KEY: null, AUTO_REFRESH_MIN: 5 };
 
+/* =========================================================================
+   LEITURA PELO PROXY
+   O proxy é um web app Apps Script que roda com a conta dona das planilhas.
+   Enquanto este painel lia com chave de API, "Campanhas Meta Ads" e o
+   "FLUXO DE CLIENTES" PRECISAVAM continuar abertos a quem tem o link — e era
+   isso que deixava o nome de cada lead e cada valor fechado ao alcance de
+   quem descobrisse o endereço. Pela leitura do proxy o dado sai do servidor,
+   e só então dá para fechar as planilhas de verdade.
+   A credencial é a MESMA do login daqui: o token sai da senha (nunca a
+   senha), pela mesma derivação do painel do CEO, para a mesma senha valer
+   nos dois. O endereço do proxy não é segredo — sem a senha ele responde
+   "credencial inválida" e nada mais.
+   ========================================================================= */
+const PROXY_URL = 'https://script.google.com/macros/s/AKfycbytVOChmKQ0X_WUn0a4cl8MN3sNWv7XDIaso7D479x_8IM5I5PyLQIgukF-cqteXFbdeA/exec';
+const CHAVE_TOKEN = 'bm_metaads_tok';
+let TOKEN_PROXY = null;
+let VIA_PROXY = false;
+
+async function derivarToken(usuario, senha) {
+  const enc = new TextEncoder();
+  const material = await crypto.subtle.importKey(
+    'raw', enc.encode(normUsuario(usuario) + '\n' + senha), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: enc.encode('bm-painel-comercial-v1'), iterations: 310000, hash: 'SHA-256' },
+    material, 256);
+  let s = '';
+  new Uint8Array(bits).forEach(b => { s += String.fromCharCode(b); });
+  return btoa(s);
+}
+
+function guardarToken(tok) {
+  TOKEN_PROXY = tok || null;
+  try {
+    if (tok) sessionStorage.setItem(CHAVE_TOKEN, tok); else sessionStorage.removeItem(CHAVE_TOKEN);
+  } catch (e) {}
+}
+
+/* Todas as fontes numa requisição só. O proxy abre cada planilha uma única
+   vez por chamada; dez chamadas separadas pagariam dez vezes a abertura. */
+async function lerVariasPeloProxy(fontes) {
+  if (!TOKEN_PROXY) throw new Error('sem credencial do proxy nesta sessao');
+  /* text/plain de propósito: mantém a requisição "simples" e evita o
+     preflight OPTIONS, que o Apps Script não responde. */
+  const resp = await fetch(PROXY_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ auth: TOKEN_PROXY, fontes: fontes }),
+    cache: 'no-store'
+  });
+  if (!resp.ok) throw new Error('o proxy respondeu HTTP ' + resp.status);
+  const j = await resp.json();
+  if (!j.ok) throw new Error(j.erro || 'o proxy recusou a credencial');
+  const out = {};
+  fontes.forEach(f => {
+    const d = j.dados && j.dados[f];
+    out[f] = (d && d.linhas) ? d.linhas : [];
+  });
+  return out;
+}
+
 /* ===== utilitários comuns ===== */
 const fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtBRL0 = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
@@ -1214,15 +1274,15 @@ async function lerAbasDe(sheetId, ranges) {
   return ((await resp.json()).valueRanges || []).map(vr => vr.values || []);
 }
 
-/* Uma planilha de Fluxo por ano (2026, 2025…). Os IDs ficam AQUI, no
-   código, e não só no cofre: a sessão guardada no navegador é a de quando a
-   pessoa entrou, e uma sessão aberta antes de a planilha de 2025 existir no
-   cofre continuaria lendo só 2026 até o navegador ser fechado — foi o que
-   aconteceu. Os IDs não são segredo (as planilhas são compartilhadas por
-   link); o que o cofre protege é a chave da API. O cofre pode acrescentar
-   planilhas; nunca remove estas. */
+/* Uma planilha de Fluxo por ano (2026, 2025…). O ano corrente vem pelo
+   proxy, pela fonte "clientes"; este resto é o histórico, que o proxy não
+   serve. O ID de 2026 saiu daqui em 05/11/2026: este repositório é público,
+   e um ID no código entrega o endereço do dado junto com a página. O de 2025
+   fica porque a sessão guardada no navegador é a de quando a pessoa entrou,
+   e uma sessão aberta antes de essa planilha existir no cofre continuaria
+   lendo só o ano corrente até o navegador ser fechado — foi o que aconteceu.
+   O cofre pode acrescentar planilhas; nunca remove estas. */
 const FLUXOS_PADRAO = [
-  '1FWbG3Xuo8TjFfi0puF6E9GFsXrUb6fRdollTfq9-4Dg',   // FLUXO DE CLIENTES [2026]
   '1nQGtxa97k5vamnt7udQJvjcNadBFAWHgd6v6dvOhI1c'    // FLUXO DE CLIENTES - 2025
 ];
 function planilhasFluxo() {
@@ -1231,7 +1291,43 @@ function planilhasFluxo() {
   return [...new Set(FLUXOS_PADRAO.concat(doCofre))];
 }
 
+/* As abas do Meta, na ordem em que montarBase as espera, e a fonte do proxy
+   que responde por cada uma. */
+const FONTES_META = ['metaDia', 'metaJanelas', 'metaAnuncios', 'metaCamp', 'metaMapeamento', 'metaSync'];
+const FONTES_EXTRA = ['metaReun', 'metaElegiveis', 'metaQualificados', 'clientes'];
+
 async function buscarTudo() {
+  /* 1) Pelo proxy. Depois que as planilhas voltarem a ser privadas, este é o
+     único caminho que funciona: só o proxy, que roda com a permissão da dona
+     delas, consegue lê-las. Uma requisição só para todas as fontes.
+     Os anos anteriores do Fluxo de Clientes não passam pelo proxy — seguem
+     pela chave de API, como antes. */
+  try {
+    const d = await lerVariasPeloProxy(FONTES_META.concat(FONTES_EXTRA));
+    if (!d.metaDia.length) throw new Error('o proxy nao devolveu os insights diarios');
+    VIA_PROXY = true;
+    const antigos = planilhasFluxo();
+    const extras = await Promise.all(antigos.map(id =>
+      lerAbasDe(id, [aspas(ABA_FLUXO)]).catch(e => {
+        console.warn('Fluxo ' + id + ' não respondeu: ' + e.message); return [[]];
+      })));
+    const fluxos = [Object.assign(tabela(d.clientes), { planilha: 'proxy' })]
+      .concat(extras.map((f, i) => Object.assign(tabela(f[0] || []), { planilha: antigos[i] })));
+    return montarBase({
+      insights: tabela(d.metaDia), janelas: tabela(d.metaJanelas), anuncios: tabela(d.metaAnuncios),
+      campanhas: tabela(d.metaCamp), mapeamento: tabela(d.metaMapeamento),
+      sync: d.metaSync,
+      reunioes: tabela(d.metaReun), elegiveis: tabela(d.metaElegiveis),
+      qualificados: tabela(d.metaQualificados),
+      fluxos: fluxos
+    });
+  } catch (e) {
+    console.warn('Proxy indisponível, caindo para a chave de API: ' + e.message);
+    VIA_PROXY = false;
+  }
+  /* 2) Retaguarda: chave de API, que só lê planilha aberta por link. Com a
+     planilha privada isso responde 401 — fica aqui para o caso de alguém
+     reabrir o compartilhamento, não como rede de segurança. */
   const ids = planilhasFluxo();
   /* Reuniões vai em chamada própria, e não no lote das abas do Meta: a aba é
      criada pelo coletor do Kommo e, enquanto não existir, um range inválido
@@ -2364,7 +2460,8 @@ async function carregarDados() {
     document.getElementById('conteudo').classList.remove('oculto');
     erroEl.classList.add('oculto');
     document.getElementById('atualizadoEm').textContent =
-      'Atualizado às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      'Atualizado às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) +
+      (VIA_PROXY ? ' · pelo proxy' : ' · por link direto');
     render(DADOS);
     ULTIMA_CONCLUIDA = minhaGeracao;
   } catch (e) {
@@ -2373,7 +2470,8 @@ async function carregarDados() {
     document.getElementById('carregando').classList.add('oculto');
     erroEl.classList.remove('oculto');
     erroEl.innerHTML = '<b>Não foi possível carregar a planilha.</b><br>' + e.message +
-      '<br>Verifique se a planilha continua compartilhada como <b>"qualquer pessoa com o link pode ver"</b>.' +
+      '<br>As planilhas são lidas pelo <b>proxy</b>, com a credencial do seu login. Se o erro' +
+      ' falar em credencial, saia e entre de novo; se persistir, avise o Gabriel.' +
       ' Nova tentativa automática em ' + CONFIG.AUTO_REFRESH_MIN + ' min.';
   }
 }
@@ -2409,9 +2507,15 @@ document.getElementById('loginForm').addEventListener('submit', async (ev) => {
   btn.disabled = true; btn.textContent = 'Verificando…';
   await new Promise(r => setTimeout(r, 30));
   try {
-    const segredo = await abrirCofre(
-      document.getElementById('campoUsuario').value,
-      document.getElementById('campoSenha').value);
+    const usuario = document.getElementById('campoUsuario').value;
+    const senha = document.getElementById('campoSenha').value;
+    /* O cofre manda: se ele não abrir, o login falhou. O token do proxy é
+       derivado em paralelo e, se falhar, só tira o proxy do caminho. */
+    const [segredo, tok] = await Promise.all([
+      abrirCofre(usuario, senha),
+      derivarToken(usuario, senha).catch(() => null)
+    ]);
+    guardarToken(tok);
     btn.textContent = 'Entrando…';
     entrarNoPainel(segredo, true);
   } catch (e) {
@@ -2424,18 +2528,27 @@ document.getElementById('loginForm').addEventListener('submit', async (ev) => {
 });
 
 document.getElementById('btnSair').addEventListener('click', () => {
-  try { sessionStorage.removeItem(CHAVE_SESSAO); } catch (e) {}
+  try { sessionStorage.removeItem(CHAVE_SESSAO); sessionStorage.removeItem(CHAVE_TOKEN); } catch (e) {}
   location.reload();
 });
 
 (async function iniciar() {
   let salvo = null;
+  try { TOKEN_PROXY = sessionStorage.getItem(CHAVE_TOKEN) || null; } catch (e) {}
   try { salvo = sessionStorage.getItem(CHAVE_SESSAO); } catch (e) {}
   if (salvo) { try { entrarNoPainel(JSON.parse(salvo), false); return; } catch (e) {} }
   let cred = null;
   try { cred = JSON.parse(sessionStorage.getItem('bm_portal_cred') || 'null'); } catch (e) {}
   if (cred && cred.u != null && cred.s != null) {
-    try { entrarNoPainel(await abrirCofre(cred.u, cred.s), true); return; } catch (e) {}
+    try {
+      const [segredo, tok] = await Promise.all([
+        abrirCofre(cred.u, cred.s),
+        derivarToken(cred.u, cred.s).catch(() => null)
+      ]);
+      guardarToken(tok);
+      entrarNoPainel(segredo, true);
+      return;
+    } catch (e) {}
   }
   document.getElementById('campoUsuario').focus();
 })();
