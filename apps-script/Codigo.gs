@@ -43,7 +43,7 @@
       Qualquer pessoa). A URL vai no botao Atualizar do painel.
    ========================================================================= */
 
-var API = 'https://graph.facebook.com/v21.0/';
+var API = 'https://graph.facebook.com/v27.0/';
 
 var ABA = {
   insights:   'Insights diários',
